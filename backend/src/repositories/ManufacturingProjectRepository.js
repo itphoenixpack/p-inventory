@@ -5,51 +5,52 @@ class ManufacturingProjectRepository extends BaseRepository {
     super(knex, 'manufacturing_projects');
   }
 
-  /**
-   * Get a project with its full Bill of Materials (items + inventory details)
-   */
-  async findWithItems(id) {
-    const project = await this.knex('manufacturing_projects').where({ id }).first();
-    if (!project) return null;
-
-    const items = await this.knex('manufacturing_items as mi')
-      .join('inventory_items as ii', 'mi.inventory_item_id', '=', 'ii.id')
-      .where('mi.project_id', id)
+  async findAllWithCost() {
+    return this.knex('manufacturing_projects')
+      .leftJoin('users', 'manufacturing_projects.created_by', '=', 'users.id')
       .select(
-        'mi.id',
-        'mi.project_id',
-        'mi.inventory_item_id',
-        'mi.quantity_used',
-        'mi.cost',
-        'ii.name as item_name',
-        'ii.category',
-        'ii.unit',
-        'ii.cost_per_unit',
-        'ii.quantity as available_quantity'
+        'manufacturing_projects.*',
+        'users.name as creator_name',
+        'users.email as creator_email',
+        this.knex('manufacturing_items')
+          .join('products', 'manufacturing_items.product_id', 'products.id')
+          .whereRaw('manufacturing_items.project_id = manufacturing_projects.id')
+          .sum(this.knex.raw('manufacturing_items.quantity_used * manufacturing_items.cost'))
+          .as('total_cost')
       )
-      .orderBy('mi.id', 'asc');
-
-    const totalCostRow = await this.knex('manufacturing_items')
-      .where({ project_id: id })
-      .sum('cost as total')
-      .first();
-
-    return {
-      ...project,
-      items,
-      total_cost: parseFloat(totalCostRow?.total || 0),
-    };
+      .orderBy('manufacturing_projects.created_at', 'desc');
   }
 
-  /**
-   * Get all projects with total_cost computed
-   */
-  async findAllWithCost() {
-    return this.knex('manufacturing_projects as mp')
-      .leftJoin('manufacturing_items as mi', 'mp.id', 'mi.project_id')
-      .select('mp.*', this.knex.raw('COALESCE(SUM(mi.cost), 0) as total_cost'))
-      .groupBy('mp.id')
-      .orderBy('mp.created_at', 'desc');
+  async findWithItems(id) {
+    const project = await this.knex('manufacturing_projects')
+      .leftJoin('users', 'manufacturing_projects.created_by', '=', 'users.id')
+      .select(
+        'manufacturing_projects.*',
+        'users.name as creator_name',
+        'users.email as creator_email',
+        this.knex('manufacturing_items')
+          .join('products', 'manufacturing_items.product_id', 'products.id')
+          .whereRaw('manufacturing_items.project_id = manufacturing_projects.id')
+          .sum(this.knex.raw('manufacturing_items.quantity_used * manufacturing_items.cost'))
+          .as('total_cost')
+      )
+      .where('manufacturing_projects.id', id)
+      .first();
+
+    if (project) {
+      project.items = await this.knex('manufacturing_items')
+        .join('products', 'manufacturing_items.product_id', '=', 'products.id')
+        .select(
+          'manufacturing_items.*',
+          'products.name as item_name',
+          'products.unit',
+          'products.category',
+          'products.cost_per_unit'
+        )
+        .where({ project_id: id });
+    }
+
+    return project;
   }
 }
 

@@ -7,19 +7,23 @@ import UserPanel from "../pages/UserPanel";
 import UpdateStock from "../pages/UpdateStock";
 import Register from "../pages/Register";
 import AdminUsers from "../pages/AdminUsers";
-import InventoryItems from "../pages/InventoryItems";
 import ManufacturingList from "../pages/ManufacturingList";
 import ManufacturingDetail from "../pages/ManufacturingDetail";
 
 import { useAuth } from "../context/AuthContext";
 
-const ProtectedRoute = ({ children, allowedRoles }) => {
+const ProtectedRoute = ({ children, allowedRoles, inpackOnly = false }) => {
   const { user, loading } = useAuth();
   
   if (loading) return <div>Synchronizing Security...</div>;
   if (!user) return <Navigate to="/login" replace />;
+  
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to={["admin", "super_admin"].includes(user.role) ? "/admin" : "/user"} replace />;
+  }
+
+  if (inpackOnly && user.company !== 'inpack') {
+    return <Navigate to="/admin" replace />;
   }
   
   return children;
@@ -76,20 +80,14 @@ const AppRoutes = () => {
           </ProtectedRoute>
         } />
 
-        <Route path="/admin/inventory-items" element={
-          <ProtectedRoute allowedRoles={["admin", "super_admin"]}>
-            <InventoryItems />
-          </ProtectedRoute>
-        } />
-
         <Route path="/admin/manufacturing" element={
-          <ProtectedRoute allowedRoles={["admin", "super_admin"]}>
+          <ProtectedRoute allowedRoles={["admin", "super_admin", "user"]} inpackOnly={true}>
             <ManufacturingList />
           </ProtectedRoute>
         } />
 
         <Route path="/admin/manufacturing/:id" element={
-          <ProtectedRoute allowedRoles={["admin", "super_admin"]}>
+          <ProtectedRoute allowedRoles={["admin", "super_admin", "user"]} inpackOnly={true}>
             <ManufacturingDetail />
           </ProtectedRoute>
         } />

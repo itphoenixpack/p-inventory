@@ -69,7 +69,7 @@ const AdminStock = () => {
             doc.setFontSize(20);
             doc.setTextColor(12, 26, 61);
             doc.text(`${companyLabel} - Global Asset Registry`, 14, 20);
-            
+
             doc.setFontSize(10);
             doc.setTextColor(100);
             doc.text(`Report Period: ${new Date().toLocaleString()}`, 14, 28);
@@ -102,7 +102,7 @@ const AdminStock = () => {
     const handleExportCSV = () => {
         try {
             const headers = ["Product Name,SKU,Warehouse,Shelf,Quantity,Status"];
-            const rows = filteredStock.map(s => 
+            const rows = filteredStock.map(s =>
                 `"${s.product_name}","${s.product_sku}","${s.warehouse_name}","${s.shelf_code}",${s.quantity},${Number(s.quantity) < 20 ? 'LOW' : 'OPTIMAL'}`
             );
             const csvContent = "data:text/csv;charset=utf-8," + headers.concat(rows).join("\n");
@@ -150,46 +150,54 @@ const AdminStock = () => {
             </div>
             <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
-                  <thead style={{ backgroundColor: "rgba(255,255,255,0.02)" }}>
-                    <tr>
-                      <th style={{ padding: "1.25rem 2rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>CORE ASSET</th>
-                      <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>REFERENCE SKU</th>
-                      <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>LOCATION</th>
-                      <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>STOCK LEVEL</th>
-                      <th style={{ padding: "1.25rem 2rem", textAlign: "right" }}>CONTROL</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.map(item => (
-                      <tr key={stockRowKey(item)}>
-                        <td style={{ padding: "1.25rem 2rem", fontWeight: 800 }}>{item.product_name}</td>
-                        <td style={{ padding: "1.25rem" }}><code style={{ background: "rgba(255,255,255,0.05)", padding: "0.2rem 0.5rem", borderRadius: "4px", fontSize: "0.75rem" }}>{item.product_sku || "N/A"}</code></td>
-                        <td style={{ padding: "1.25rem", fontWeight: 700, color: "var(--primary)" }}>{item.shelf_code || "—"}</td>
-                        <td style={{ padding: "1.25rem" }}>
-                          <div className="flex align-center gap-1">
-                            <span style={{ fontWeight: 900, minWidth: "30px" }}>{item.quantity}</span>
-                            <div style={{ width: "80px", height: "4px", background: "rgba(255,255,255,0.05)", borderRadius: "2px", overflow: "hidden" }}>
-                              <div style={{ 
-                                width: `${Math.min((item.quantity / 100) * 100, 100)}%`, 
-                                height: "100%", 
-                                background: Number(item.quantity) < 20 ? "var(--accent)" : "var(--success)",
-                                boxShadow: `0 0 10px ${Number(item.quantity) < 20 ? "rgba(249, 115, 22, 0.3)" : "rgba(16, 185, 129, 0.3)"}`
-                              }} />
-                            </div>
-                            <StatusPill qty={item.quantity} />
-                          </div>
-                        </td>
-                        <td style={{ padding: "1.25rem 2rem", textAlign: "right" }}>
-                          {role === "admin" && (
-                            <div className="flex justify-end gap-1">
-                              <button className="btn-sm" onClick={() => handleEditClick(item)} style={{ background: "rgba(255,255,255,0.05)", fontWeight: 800 }}>ADJUST</button>
-                              <button className="btn-sm" onClick={() => handleDelete(item)} style={{ background: "rgba(225, 29, 72, 0.1)", color: "var(--accent)", fontWeight: 800 }}>REDACT</button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
+                    <thead style={{ backgroundColor: "rgba(255,255,255,0.02)" }}>
+                        <tr>
+                            <th style={{ padding: "1.25rem 2rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>CORE ASSET</th>
+                            <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>REFERENCE SKU</th>
+                            <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>CATEGORY</th>
+                            <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>LOCATION</th>
+                            <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>STOCK LEVEL</th>
+                            <th style={{ padding: "1.25rem 2rem", textAlign: "right" }}>CONTROL</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {data.map(item => (
+                            <tr key={stockRowKey(item)}>
+                                <td style={{ padding: "1.25rem 2rem", fontWeight: 800 }}>{item.product_name}</td>
+                                <td style={{ padding: "1.25rem" }}><code style={{ background: "rgba(255,255,255,0.05)", padding: "0.2rem 0.5rem", borderRadius: "4px", fontSize: "0.75rem" }}>{item.product_sku || "N/A"}</code></td>
+                                <td style={{ padding: "1.25rem" }}>
+                                    <span style={{
+                                        padding: "0.2rem 0.5rem", borderRadius: "4px", fontSize: "0.6rem", fontWeight: 800,
+                                        background: item.category === 'spare_part' ? 'rgba(99, 102, 241, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                                        color: item.category === 'spare_part' ? '#6366f1' : 'var(--success)'
+                                    }}>{item.category?.replace('_', ' ').toUpperCase() || 'RAW MATERIAL'}</span>
+                                </td>
+                                <td style={{ padding: "1.25rem", fontWeight: 700, color: "var(--primary)" }}>{item.shelf_code || "—"}</td>
+                                <td style={{ padding: "1.25rem" }}>
+                                    <div className="flex align-center gap-1">
+                                        <span style={{ fontWeight: 900, minWidth: "30px" }}>{item.quantity}</span>
+                                        <div style={{ width: "80px", height: "4px", background: "rgba(255,255,255,0.05)", borderRadius: "2px", overflow: "hidden" }}>
+                                            <div style={{
+                                                width: `${Math.min((item.quantity / 100) * 100, 100)}%`,
+                                                height: "100%",
+                                                background: Number(item.quantity) < 20 ? "var(--accent)" : "var(--success)",
+                                                boxShadow: `0 0 10px ${Number(item.quantity) < 20 ? "rgba(249, 115, 22, 0.3)" : "rgba(16, 185, 129, 0.3)"}`
+                                            }} />
+                                        </div>
+                                        <StatusPill qty={item.quantity} />
+                                    </div>
+                                </td>
+                                <td style={{ padding: "1.25rem 2rem", textAlign: "right" }}>
+                                    {role === "admin" && (
+                                        <div className="flex justify-end gap-1">
+                                            <button className="btn-sm" onClick={() => handleEditClick(item)} style={{ background: "rgba(255,255,255,0.05)", fontWeight: 800 }}>ADJUST</button>
+                                            <button className="btn-sm" onClick={() => handleDelete(item)} style={{ background: "rgba(225, 29, 72, 0.1)", color: "var(--accent)", fontWeight: 800 }}>REDACT</button>
+                                        </div>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
                 </table>
             </div>
         </div>
@@ -241,7 +249,7 @@ const AdminStock = () => {
                             <h2 style={{ letterSpacing: "-1px" }}>Inventory <span className="text-accent">Dossier</span></h2>
                             <p className="text-muted" style={{ fontSize: "0.8rem", fontWeight: 600 }}>Adjusting: {editingItem.product_name}</p>
                         </header>
-                        
+
                         <form onSubmit={handleUpdate} className="flex flex-column gap-1">
                             <div>
                                 <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>FACILITY STORAGE PIN</label>
@@ -254,6 +262,7 @@ const AdminStock = () => {
                             <div className="flex gap-1 justify-end mt-2">
                                 <button type="button" onClick={() => setEditingItem(null)} style={{ flex: 1, backgroundColor: "#334155", color: "white", fontWeight: 800 }}>ABORT</button>
                                 <button type="submit" style={{ flex: 1, backgroundColor: "var(--primary)", color: "white", fontWeight: 800 }}>UPDATE REPOSITORY</button>
+
                             </div>
                         </form>
                     </div>

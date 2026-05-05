@@ -272,6 +272,57 @@ const AdminPanel = () => {
                     </div>
                 </div>
 
+                <div className="flex gap-2 mb-2" style={{ flexWrap: "wrap" }}>
+                    <div className="card" style={{ flex: 1, minWidth: "300px" }}>
+                        <h2 style={{ fontSize: "1.1rem", marginBottom: "1.5rem" }}>Stock Distribution <span className="text-accent">by Category</span></h2>
+                        <div className="flex flex-column gap-1">
+                            {['raw_material', 'spare_part'].map(cat => {
+                                const count = products.filter(p => p.category === cat).length;
+                                const total = products.length || 1;
+                                const percent = (count / total) * 100;
+                                return (
+                                    <div key={cat}>
+                                        <div className="flex justify-between mb-0.5">
+                                            <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>{cat.replace('_', ' ').toUpperCase()}</span>
+                                            <span style={{ fontSize: "0.8rem", fontWeight: 800 }}>{count} Items ({Math.round(percent)}%)</span>
+                                        </div>
+                                        <div style={{ height: "8px", background: "rgba(255,255,255,0.05)", borderRadius: "4px", overflow: "hidden" }}>
+                                            <div style={{ 
+                                                width: `${percent}%`, height: "100%", 
+                                                background: cat === 'spare_part' ? "#6366f1" : "var(--success)",
+                                                boxShadow: `0 0 10px ${cat === 'spare_part' ? "rgba(99, 102, 241, 0.3)" : "rgba(16, 185, 129, 0.3)"}`
+                                            }} />
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="card" style={{ flex: 1, minWidth: "300px" }}>
+                        <h2 style={{ fontSize: "1.1rem", marginBottom: "1.5rem" }}>Warehouse <span className="text-accent">Load</span></h2>
+                        <div className="flex flex-column gap-1">
+                            {['Warehouse 2', 'Warehouse 3'].map(w => {
+                                const wStock = stock.filter(s => s.warehouse_name === w);
+                                const totalUnits = wStock.reduce((acc, s) => acc + (s.quantity || 0), 0);
+                                const items = wStock.length;
+                                return (
+                                    <div key={w} className="flex justify-between align-center p-1" style={{ background: "rgba(255,255,255,0.02)", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                                        <div>
+                                            <div style={{ fontSize: "0.9rem", fontWeight: 800 }}>{w.toUpperCase()}</div>
+                                            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{items} Distinct SKU records</div>
+                                        </div>
+                                        <div style={{ textAlign: "right" }}>
+                                            <div style={{ fontSize: "1.25rem", fontWeight: 900, color: "var(--primary)" }}>{totalUnits}</div>
+                                            <div style={{ fontSize: "0.6rem", fontWeight: 700, letterSpacing: "1px" }}>TOTAL UNITS</div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+
                 <div className="card">
                     <div className="flex justify-between align-center mb-2" style={{ flexWrap: "wrap", gap: "1rem" }}>
                         <div>

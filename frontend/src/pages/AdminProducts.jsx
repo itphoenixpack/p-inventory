@@ -15,10 +15,13 @@ const AdminProducts = () => {
     const [newProduct, setNewProduct] = useState({
         name: "",
         warehouse_id: 1,
-        shelf_code: ""
+        shelf_code: "",
+        category: "raw_material",
+        unit: "pcs",
+        cost_per_unit: 0
     });
     const [editingProduct, setEditingProduct] = useState(null);
-    const [editData, setEditData] = useState({ name: "", description: "" });
+    const [editData, setEditData] = useState({ name: "", description: "", category: "raw_material", unit: "pcs", cost_per_unit: 0 });
     const [message, setMessage] = useState({ type: "", text: "" });
     const [warehouses] = useState([
         { id: 1, name: "Warehouse 2" },
@@ -47,7 +50,10 @@ const AdminProducts = () => {
             await api.post("/products", {
                 name: newProduct.name,
                 warehouse_id: newProduct.warehouse_id,
-                shelf_code: newProduct.shelf_code
+                shelf_code: newProduct.shelf_code,
+                category: newProduct.category,
+                unit: newProduct.unit,
+                cost_per_unit: newProduct.cost_per_unit
             });
 
             toast.success("Asset cataloged and synchronized!");
@@ -64,7 +70,13 @@ const AdminProducts = () => {
 
     const handleEditClick = (p) => {
         setEditingProduct(p);
-        setEditData({ name: p.name, description: p.description || "" });
+        setEditData({ 
+            name: p.name, 
+            description: p.description || "",
+            category: p.category || "raw_material",
+            unit: p.unit || "pcs",
+            cost_per_unit: p.cost_per_unit || 0
+        });
     };
 
     const handleUpdate = async (e) => {
@@ -143,6 +155,24 @@ const AdminProducts = () => {
                                 </div>
                             </div>
 
+                            <div className="flex gap-1" style={{ flexWrap: "wrap" }}>
+                                <div style={{ flex: 1, minWidth: "200px" }}>
+                                    <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>CATEGORY</label>
+                                    <select value={newProduct.category} onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })} style={{ height: "3.5rem", backgroundColor: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", color: "white", padding: "0 1rem", borderRadius: "12px" }}>
+                                        <option value="raw_material">RAW MATERIAL</option>
+                                        <option value="spare_part">SPARE PART</option>
+                                    </select>
+                                </div>
+                                <div style={{ flex: 1, minWidth: "150px" }}>
+                                    <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>UNIT</label>
+                                    <input type="text" value={newProduct.unit} onChange={(e) => setNewProduct({ ...newProduct, unit: e.target.value })} placeholder="pcs, kg, etc." style={{ height: "3.5rem", backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }} />
+                                </div>
+                                <div style={{ flex: 1, minWidth: "150px" }}>
+                                    <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>COST / UNIT (₹)</label>
+                                    <input type="number" value={newProduct.cost_per_unit} onChange={(e) => setNewProduct({ ...newProduct, cost_per_unit: e.target.value })} placeholder="0.00" style={{ height: "3.5rem", backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }} />
+                                </div>
+                            </div>
+
                             <div className="flex justify-end mt-1">
                                 <button type="submit" disabled={loading} style={{ height: "3.5rem", padding: "0 2rem", fontWeight: 900 }}>
                                     {loading ? "INITIALIZING..." : "VERIFY AND REGISTER ASSET"}
@@ -164,6 +194,8 @@ const AdminProducts = () => {
                                 <tr>
                                     <th style={{ padding: "1.25rem 2rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>CORE ASSET</th>
                                     <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>TECHNICAL SKU</th>
+                                    <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>CATEGORY</th>
+                                    <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>UNIT COST</th>
                                     <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>SPECIFICATIONS</th>
                                     <th style={{ padding: "1.25rem 2rem", textAlign: "right" }}>CONTROL</th>
                                 </tr>
@@ -178,6 +210,15 @@ const AdminProducts = () => {
                                             <td style={{ padding: "1.25rem" }}>
                                                 <code style={{ background: "rgba(255,255,255,0.05)", padding: "0.25rem 0.6rem", borderRadius: "4px", fontSize: "0.8rem", color: "white" }}>{p.sku}</code>
                                             </td>
+                                            <td style={{ padding: "1.25rem" }}>
+                                                <span style={{ 
+                                                    padding: "0.25rem 0.6rem", borderRadius: "20px", fontSize: "0.65rem", fontWeight: 800,
+                                                    backgroundColor: p.category === "spare_part" ? "rgba(99, 102, 241, 0.1)" : "rgba(16, 185, 129, 0.1)",
+                                                    color: p.category === "spare_part" ? "#6366f1" : "var(--success)",
+                                                    border: `1px solid ${p.category === "spare_part" ? "#6366f1" : "var(--success)"}`
+                                                }}>{p.category?.replace('_', ' ').toUpperCase()}</span>
+                                            </td>
+                                            <td style={{ padding: "1.25rem", fontWeight: 700 }}>₹{parseFloat(p.cost_per_unit || 0).toFixed(2)} / {p.unit || 'pcs'}</td>
                                             <td className="text-muted" style={{ padding: "1.25rem", fontSize: "0.85rem", fontWeight: 500 }}>{p.description || "No specifications defined."}</td>
                                             <td style={{ padding: "1.25rem 2rem", textAlign: "right" }}>
                                                 {(role === "admin" || role === "user") && (
@@ -212,9 +253,26 @@ const AdminProducts = () => {
                                 <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>PRODUCT NAME</label>
                                 <input type="text" value={editData.name} onChange={(e) => setEditData({ ...editData, name: e.target.value })} required style={{ height: "3.5rem", backgroundColor: "rgba(255,255,255,0.03)", color: "white" }} />
                             </div>
-                            <div>
+                             <div>
                                 <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>ANALYSIS / TECH SPECS</label>
-                                <textarea value={editData.description} onChange={(e) => setEditData({ ...editData, description: e.target.value })} style={{ height: "120px", resize: "none", backgroundColor: "rgba(255,255,255,0.03)", color: "white", padding: "1rem" }} placeholder="Define asset specifications..." />
+                                <textarea value={editData.description} onChange={(e) => setEditData({ ...editData, description: e.target.value })} style={{ height: "80px", resize: "none", backgroundColor: "rgba(255,255,255,0.03)", color: "white", padding: "1rem" }} placeholder="Define asset specifications..." />
+                            </div>
+                            <div className="flex gap-1">
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>CATEGORY</label>
+                                    <select value={editData.category} onChange={(e) => setEditData({ ...editData, category: e.target.value })} style={{ height: "3.5rem", backgroundColor: "#1e293b", border: "1px solid rgba(255,255,255,0.1)", color: "white", padding: "0 1rem", borderRadius: "12px" }}>
+                                        <option value="raw_material">RAW MATERIAL</option>
+                                        <option value="spare_part">SPARE PART</option>
+                                    </select>
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>UNIT</label>
+                                    <input type="text" value={editData.unit} onChange={(e) => setEditData({ ...editData, unit: e.target.value })} style={{ height: "3.5rem", backgroundColor: "rgba(255,255,255,0.03)", color: "white" }} />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>COST / UNIT (₹)</label>
+                                    <input type="number" value={editData.cost_per_unit} onChange={(e) => setEditData({ ...editData, cost_per_unit: e.target.value })} style={{ height: "3.5rem", backgroundColor: "rgba(255,255,255,0.03)", color: "white" }} />
+                                </div>
                             </div>
                             <div className="flex gap-1 justify-end mt-2">
                                 <button type="button" onClick={() => setEditingProduct(null)} style={{ flex: 1, backgroundColor: "#334155" }}>ABORT</button>

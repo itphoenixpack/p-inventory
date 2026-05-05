@@ -5,9 +5,22 @@ class ManufacturingItemRepository extends BaseRepository {
     super(knex, 'manufacturing_items');
   }
 
-  async findByProjectAndItem(projectId, inventoryItemId) {
-    return this.knex(this.tableName)
-      .where({ project_id: projectId, inventory_item_id: inventoryItemId })
+  async findByProject(projectId) {
+    return this.knex('manufacturing_items')
+      .join('products', 'manufacturing_items.product_id', '=', 'products.id')
+      .select(
+        'manufacturing_items.*',
+        'products.name as item_name',
+        'products.unit',
+        'products.category',
+        'products.cost_per_unit'
+      )
+      .where({ project_id: projectId });
+  }
+
+  async findDuplicate(projectId, productId) {
+    return this.knex('manufacturing_items')
+      .where({ project_id: projectId, product_id: productId })
       .first();
   }
 }

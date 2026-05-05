@@ -6,9 +6,9 @@ const autoTable = require('jspdf-autotable');
 
 // Status flow: which transitions are allowed
 const ALLOWED_TRANSITIONS = {
-  not_started: ['active'],
-  active: ['closed'],
-  closed: [],
+  not_started: ['active', 'closed'],
+  active:      ['not_started', 'closed'],
+  closed:      ['active', 'not_started'],
 };
 
 class ManufacturingService extends BaseService {
@@ -19,11 +19,22 @@ class ManufacturingService extends BaseService {
     this.knex = knex;
   }
 
+  _checkAccess(project, user) {
+    if (!project) throw { statusCode: 404, message: 'Project not found.' };
+    const isAdmin = ['admin', 'super_admin'].includes(user?.role);
+    const isOwner = project.created_by === user?.id;
+    
+    if (!isAdmin && !isOwner) {
+      throw { statusCode: 403, message: 'You do not have permission to modify this project. Only the creator or an administrator can perform this action.' };
+    }
+  }
+
+
   // ──────────────────────────────────────────────────────────────
   // PROJECTS
   // ──────────────────────────────────────────────────────────────
 
-  async createProject({ machine_name, note = null }) {
+  async createProject({ machine_name, note = null, budget = 0 }, userId) {
     if (!machine_name || !machine_name.trim()) {
       throw { statusCode: 400, message: 'Machine name is required.' };
     }
@@ -31,7 +42,23 @@ class ManufacturingService extends BaseService {
       machine_name: machine_name.trim(),
       status: 'not_started',
       note: note || null,
+      budget: parseFloat(budget) || 0,
+      created_by: userId
     });
+  }
+
+  async updateProject(id, { machine_name, note, budget }, user) {
+    const project = await this.repository.findById(id);
+    this._checkAccess(project, user);
+    
+
+    const updateData = {};
+    if (machine_name !== undefined) updateData.machine_name = machine_name.trim();
+    if (note !== undefined) updateData.note = note || null;
+    if (budget !== undefined) updateData.budget = parseFloat(budget) || 0;
+    updateData.updated_at = new Date();
+
+    return this.repository.update(id, updateData);
   }
 
   async getAllProjects() {
@@ -44,9 +71,9 @@ class ManufacturingService extends BaseService {
     return project;
   }
 
-  async updateStatus(id, newStatus) {
+  async updateStatus(id, newStatus, user) {
     const project = await this.repository.findById(id);
-    if (!project) throw { statusCode: 404, message: 'Manufacturing project not found.' };
+    this._checkAccess(project, user);
 
     const allowed = ALLOWED_TRANSITIONS[project.status] || [];
     if (!allowed.includes(newStatus)) {
@@ -59,140 +86,147 @@ class ManufacturingService extends BaseService {
     return this.repository.update(id, { status: newStatus, updated_at: new Date() });
   }
 
-  // ──────────────────────────────────────────────────────────────
-  // BILL OF MATERIALS OPERATIONS
-  // ──────────────────────────────────────────────────────────────
-
-  async _assertNotClosed(projectId) {
-    const project = await this.repository.findById(projectId);
-    if (!project) throw { statusCode: 404, message: 'Manufacturing project not found.' };
-    if (project.status === 'closed') {
-      throw { statusCode: 403, message: 'This project is closed. No further edits are allowed.' };
-    }
-    return project;
+  async deleteProject(id, user) {
+    const project = await this.repository.findById(id);
+    this._checkAccess(project, user);
+    return this.repository.delete(id);
   }
 
-  async addItemToProject(projectId, inventoryItemId, quantityUsed) {
+  // ──────────────────────────────────────────────────────────────
+  // BILL OF MATERIALS OPERATIONS (INTEGRATED WITH STOCK)
+  // ──────────────────────────────────────────────────────────────
+
+
+  async addItemToProject(projectId, productId, quantityUsed, cost, user) {
     quantityUsed = parseFloat(quantityUsed);
+    cost = parseFloat(cost) || 0;
     if (!quantityUsed || quantityUsed <= 0) {
       throw { statusCode: 400, message: 'Quantity must be greater than 0.' };
     }
 
-    await this._assertNotClosed(projectId);
+    const project = await this.repository.findById(projectId);
+    this._checkAccess(project, user);
 
     return this.knex.transaction(async (trx) => {
-      // Lock and fetch inventory item
-      const invItem = await this.knex('inventory_items')
+      // 1. Fetch item and total stock
+      const product = await this.knex('products')
         .transacting(trx)
-        .where({ id: inventoryItemId })
+        .where({ id: productId })
         .forUpdate()
         .first();
 
-      if (!invItem) throw { statusCode: 404, message: 'Inventory item not found.' };
-      if (parseFloat(invItem.quantity) < quantityUsed) {
+      if (!product) throw { statusCode: 404, message: 'Item not found in catalog.' };
+
+      const stocks = await this.knex('stock')
+        .transacting(trx)
+        .where({ product_id: productId })
+        .orderBy('quantity', 'desc')
+        .forUpdate();
+
+      const totalAvail = stocks.reduce((sum, s) => sum + parseFloat(s.quantity), 0);
+
+      if (totalAvail < quantityUsed) {
         throw {
           statusCode: 400,
-          message: `Insufficient stock for "${invItem.name}". Available: ${invItem.quantity}, requested: ${quantityUsed}.`,
+          message: `Insufficient stock for "${product.name}". Total available across warehouses: ${totalAvail}, requested: ${quantityUsed}.`,
         };
       }
 
-      // Deduct stock
-      await this.knex('inventory_items')
-        .transacting(trx)
-        .where({ id: inventoryItemId })
-        .update({ quantity: this.knex.raw('quantity - ?', [quantityUsed]), updated_at: this.knex.fn.now() });
+      // 2. Deduct from warehouses (FIFO-ish, highest quantity first)
+      let remainingToDeduct = quantityUsed;
+      for (const stockRecord of stocks) {
+        if (remainingToDeduct <= 0) break;
+        
+        const deductFromThis = Math.min(parseFloat(stockRecord.quantity), remainingToDeduct);
+        
+        await this.knex('stock')
+          .transacting(trx)
+          .where({ id: stockRecord.id })
+          .update({ 
+            quantity: this.knex.raw('quantity - ?', [deductFromThis]), 
+            updated_at: this.knex.fn.now() 
+          });
 
-      // Upsert manufacturing_items (handle duplication)
+        // Record transaction for audit
+        await this.knex('inventory_transactions')
+          .transacting(trx)
+          .insert({
+            product_id: productId,
+            warehouse_name: stockRecord.warehouse_name,
+            shelf_code: stockRecord.shelf_code,
+            quantity: -deductFromThis,
+            type: 'OUT',
+            user_id: user.id,
+            notes: `Consumption for Manufacturing Project #${projectId}`
+          });
+
+        remainingToDeduct -= deductFromThis;
+      }
+
+      // 3. Update Bill of Materials (manufacturing_items)
       const existing = await this.knex('manufacturing_items')
         .transacting(trx)
-        .where({ project_id: projectId, inventory_item_id: inventoryItemId })
+        .where({ project_id: projectId, product_id: productId })
         .first();
-
-      const costPerUnit = parseFloat(invItem.cost_per_unit);
 
       if (existing) {
         const newQtyUsed = parseFloat(existing.quantity_used) + quantityUsed;
-        const newCost = newQtyUsed * costPerUnit;
         await this.knex('manufacturing_items')
           .transacting(trx)
           .where({ id: existing.id })
-          .update({ quantity_used: newQtyUsed, cost: newCost });
-        return { ...existing, quantity_used: newQtyUsed, cost: newCost };
+          .update({ quantity_used: newQtyUsed, cost: cost });
+        return { ...existing, quantity_used: newQtyUsed, cost: cost };
       } else {
-        const cost = quantityUsed * costPerUnit;
         const [row] = await this.knex('manufacturing_items')
           .transacting(trx)
-          .insert({ project_id: projectId, inventory_item_id: inventoryItemId, quantity_used: quantityUsed, cost })
+          .insert({ project_id: projectId, product_id: productId, quantity_used: quantityUsed, cost: cost })
           .returning('*');
-        return row;
+        return row[0] || row;
       }
     });
   }
 
-  async updateItemInProject(projectId, bomItemId, newQuantityUsed) {
-    newQuantityUsed = parseFloat(newQuantityUsed);
-    if (!newQuantityUsed || newQuantityUsed <= 0) {
-      throw { statusCode: 400, message: 'Quantity must be greater than 0.' };
-    }
-
-    await this._assertNotClosed(projectId);
+  async removeItemFromProject(projectId, bomItemId, user) {
+    const project = await this.repository.findById(projectId);
+    this._checkAccess(project, user);
 
     return this.knex.transaction(async (trx) => {
+
       const bomRow = await this.knex('manufacturing_items')
         .transacting(trx)
         .where({ id: bomItemId, project_id: projectId })
         .first();
       if (!bomRow) throw { statusCode: 404, message: 'BOM item not found.' };
 
-      const invItem = await this.knex('inventory_items')
+      // Restore stock - we'll restore to the warehouse it was most likely taken from, or just the first one
+      const stockRecord = await this.knex('stock')
         .transacting(trx)
-        .where({ id: bomRow.inventory_item_id })
-        .forUpdate()
-        .first();
+        .where({ product_id: bomRow.product_id })
+        .first() || await this.knex('stock')
+          .transacting(trx)
+          .insert({ product_id: bomRow.product_id, warehouse_name: 'Main warehouse', quantity: 0 })
+          .returning('*')
+          .then(rows => rows[0]);
 
-      // Restore old quantity back to stock
-      const restoredQty = parseFloat(invItem.quantity) + parseFloat(bomRow.quantity_used);
-
-      // Validate new quantity against restored stock
-      if (restoredQty < newQuantityUsed) {
-        throw {
-          statusCode: 400,
-          message: `Insufficient stock for "${invItem.name}". Available (after restore): ${restoredQty}, requested: ${newQuantityUsed}.`,
-        };
-      }
-
-      // Apply new deduction
-      const finalQty = restoredQty - newQuantityUsed;
-      await this.knex('inventory_items')
+      await this.knex('stock')
         .transacting(trx)
-        .where({ id: invItem.id })
-        .update({ quantity: finalQty, updated_at: this.knex.fn.now() });
+        .where({ id: stockRecord.id })
+        .update({ 
+          quantity: this.knex.raw('quantity + ?', [parseFloat(bomRow.quantity_used)]), 
+          updated_at: this.knex.fn.now() 
+        });
 
-      const newCost = newQuantityUsed * parseFloat(invItem.cost_per_unit);
-      await this.knex('manufacturing_items')
+      // Record transaction
+      await this.knex('inventory_transactions')
         .transacting(trx)
-        .where({ id: bomItemId })
-        .update({ quantity_used: newQuantityUsed, cost: newCost });
-
-      return { ...bomRow, quantity_used: newQuantityUsed, cost: newCost };
-    });
-  }
-
-  async removeItemFromProject(projectId, bomItemId) {
-    await this._assertNotClosed(projectId);
-
-    return this.knex.transaction(async (trx) => {
-      const bomRow = await this.knex('manufacturing_items')
-        .transacting(trx)
-        .where({ id: bomItemId, project_id: projectId })
-        .first();
-      if (!bomRow) throw { statusCode: 404, message: 'BOM item not found.' };
-
-      // Restore stock
-      await this.knex('inventory_items')
-        .transacting(trx)
-        .where({ id: bomRow.inventory_item_id })
-        .update({ quantity: this.knex.raw('quantity + ?', [bomRow.quantity_used]), updated_at: this.knex.fn.now() });
+        .insert({
+          product_id: bomRow.product_id,
+          warehouse_name: stockRecord.warehouse_name,
+          quantity: parseFloat(bomRow.quantity_used),
+          type: 'IN',
+          user_id: user.id,
+          notes: `Restored from deleted Manufacturing Project #${projectId}`
+        });
 
       await this.knex('manufacturing_items')
         .transacting(trx)
@@ -200,6 +234,102 @@ class ManufacturingService extends BaseService {
         .del();
 
       return { deleted: true };
+    });
+  }
+
+  async updateItemQuantity(projectId, bomItemId, newQuantity, newCost, user) {
+    newQuantity = parseFloat(newQuantity);
+    if (newQuantity <= 0) throw { statusCode: 400, message: 'Quantity must be greater than 0.' };
+    const cost = newCost !== undefined ? parseFloat(newCost) : undefined;
+    
+    const project = await this.repository.findById(projectId);
+    this._checkAccess(project, user);
+
+    return this.knex.transaction(async (trx) => {
+      const bomRow = await this.knex('manufacturing_items')
+        .transacting(trx)
+        .where({ id: bomItemId, project_id: projectId })
+        .forUpdate()
+        .first();
+
+      if (!bomRow) throw { statusCode: 404, message: 'BOM item not found.' };
+
+      const diff = newQuantity - parseFloat(bomRow.quantity_used);
+      if (diff === 0) return bomRow;
+
+      if (diff > 0) {
+        // Deduct more stock
+        const stocks = await this.knex('stock')
+          .transacting(trx)
+          .where({ product_id: bomRow.product_id })
+          .orderBy('quantity', 'desc')
+          .forUpdate();
+
+        const totalAvail = stocks.reduce((sum, s) => sum + parseFloat(s.quantity), 0);
+        if (totalAvail < diff) throw { statusCode: 400, message: 'Insufficient stock for adjustment.' };
+
+        let remainingToDeduct = diff;
+        for (const s of stocks) {
+          if (remainingToDeduct <= 0) break;
+          const deduct = Math.min(parseFloat(s.quantity), remainingToDeduct);
+          await this.knex('stock').transacting(trx).where({ id: s.id }).update({ quantity: this.knex.raw('quantity - ?', [deduct]) });
+          
+          await this.knex('inventory_transactions')
+            .transacting(trx)
+            .insert({
+              product_id: bomRow.product_id,
+              warehouse_name: s.warehouse_name,
+              quantity: -deduct,
+              type: 'OUT',
+              user_id: user.id,
+              notes: `Additional consumption for Project #${projectId} (Adjustment)`
+            });
+
+          remainingToDeduct -= deduct;
+        }
+      } else {
+        // Restore stock
+        const restoreQty = Math.abs(diff);
+        // Try to find a stock record for this product to restore to
+        const stockRecord = await this.knex('stock')
+          .transacting(trx)
+          .where({ product_id: bomRow.product_id })
+          .first();
+        
+        const targetWarehouse = stockRecord ? stockRecord.warehouse_name : 'Main warehouse';
+        
+        if (stockRecord) {
+          await this.knex('stock').transacting(trx).where({ id: stockRecord.id }).update({ quantity: this.knex.raw('quantity + ?', [restoreQty]) });
+        } else {
+          await this.knex('stock').transacting(trx).insert({
+            product_id: bomRow.product_id,
+            warehouse_name: targetWarehouse,
+            quantity: restoreQty
+          });
+        }
+
+        await this.knex('inventory_transactions')
+          .transacting(trx)
+          .insert({
+            product_id: bomRow.product_id,
+            warehouse_name: targetWarehouse,
+            quantity: restoreQty,
+            type: 'IN',
+            user_id: user.id,
+            notes: `Restored from Project #${projectId} (Adjustment)`
+          });
+      }
+
+      const updateData = { quantity_used: newQuantity };
+      if (cost !== undefined) updateData.cost = cost;
+
+      const updated = await this.knex('manufacturing_items')
+        .transacting(trx)
+        .where({ id: bomItemId })
+        .update(updateData)
+        .returning('*');
+
+      return updated[0];
     });
   }
 
@@ -268,14 +398,12 @@ class ManufacturingService extends BaseService {
       i + 1,
       item.item_name,
       item.category === 'spare_part' ? 'Spare Part' : 'Raw Material',
-      `${item.quantity_used} ${item.unit}`,
-      `₹ ${parseFloat(item.cost_per_unit).toFixed(2)}`,
-      `₹ ${parseFloat(item.cost).toFixed(2)}`,
+      `${item.quantity_used} ${item.unit || 'pcs'}`,
     ]);
 
     autoTable.default(doc, {
       startY: 76,
-      head: [['#', 'Item Name', 'Category', 'Qty Used', 'Cost / Unit', 'Total Cost']],
+      head: [['#', 'Item Name', 'Category', 'Qty Used']],
       body: tableRows,
       theme: 'grid',
       headStyles: { fillColor: [10, 36, 99], textColor: 255, fontStyle: 'bold', fontSize: 9 },
@@ -283,20 +411,8 @@ class ManufacturingService extends BaseService {
       alternateRowStyles: { fillColor: [245, 247, 252] },
       columnStyles: {
         0: { cellWidth: 10, halign: 'center' },
-        4: { halign: 'right' },
-        5: { halign: 'right', fontStyle: 'bold' },
       },
     });
-
-    // ── Grand Total
-    const finalY = doc.previousAutoTable.finalY + 6;
-    doc.setFillColor(10, 36, 99);
-    doc.roundedRect(130, finalY, 66, 12, 2, 2, 'F');
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(255);
-    doc.text('GRAND TOTAL:', 134, finalY + 8);
-    doc.text(`₹ ${project.total_cost.toFixed(2)}`, 185, finalY + 8, { align: 'right' });
 
     // ── Footer
     doc.setFontSize(7);

@@ -18,6 +18,7 @@ const dataToImport = [
     // ["Product Name", WarehouseID, "ShelfPin"],
 ];
 
+
 async function bulkImport() {
     if (dataToImport.length === 0) {
         console.error("❌ ERROR: No data found in 'dataToImport' array. Please paste your data first.");

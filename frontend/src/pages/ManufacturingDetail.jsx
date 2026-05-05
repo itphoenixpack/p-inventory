@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import api from "../api/axios";
 import { toast } from "react-hot-toast";
+import { useAuth } from "../context/AuthContext";
 
 const STATUS_META = {
   not_started: { label: "Not Started", color: "#6b7280", bg: "rgba(107,114,128,0.12)" },
@@ -11,14 +12,15 @@ const STATUS_META = {
 };
 
 const ALLOWED_TRANSITIONS = {
-  not_started: ["active"],
-  active: ["closed"],
-  closed: [],
+  not_started: ["active", "closed"],
+  active:      ["not_started", "closed"],
+  closed:      ["active", "not_started"],
 };
 
 const ManufacturingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -28,6 +30,7 @@ const ManufacturingDetail = () => {
   const [searchResults, setSearchResults] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [qtyInput, setQtyInput] = useState("");
+  const [costInput, setCostInput] = useState("");
   const [addingItem, setAddingItem] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const searchRef = useRef(null);
@@ -36,6 +39,7 @@ const ManufacturingDetail = () => {
   // Edit BOM item inline
   const [editingBomId, setEditingBomId] = useState(null);
   const [editQty, setEditQty] = useState("");
+  const [editCost, setEditCost] = useState("");
 
   // Status
   const [updatingStatus, setUpdatingStatus] = useState(false);
@@ -43,12 +47,26 @@ const ManufacturingDetail = () => {
   // PDF
   const [downloadingPdf, setDownloadingPdf] = useState(false);
 
+  // Edit Project Info
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({ machine_name: "", note: "", budget: "" });
+  const [savingProject, setSavingProject] = useState(false);
+
+
   const fetchProject = useCallback(async () => {
     try {
       const res = await api.get(`/manufacturing/${id}`);
-      setProject(res.data.data);
-    } catch {
-      toast.error("Failed to load project.");
+      const data = res.data.data;
+      if (!data) throw new Error("Project data missing");
+      setProject(data);
+      setEditForm({ 
+        machine_name: data.machine_name, 
+        note: data.note || "", 
+        budget: data.budget || "" 
+      });
+    } catch (err) {
+      toast.error("Project identity could not be verified in the production matrix.");
+      navigate("/admin/manufacturing");
     } finally {
       setLoading(false);
     }
@@ -56,18 +74,41 @@ const ManufacturingDetail = () => {
 
   useEffect(() => { fetchProject(); }, [fetchProject]);
 
+  const handleUpdateProject = async (e) => {
+    e.preventDefault();
+    setSavingProject(true);
+    try {
+      await api.put(`/manufacturing/${id}`, editForm);
+      toast.success("Project updated.");
+      setShowEditModal(false);
+      fetchProject();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to update project.");
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
   // Debounced search
   useEffect(() => {
     if (!searchTerm.trim()) { setSearchResults([]); setShowDropdown(false); return; }
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
-      try {
-        const res = await api.get(`/inventory-items/search?q=${encodeURIComponent(searchTerm)}`);
-        setSearchResults(res.data.data || []);
-        setShowDropdown(true);
-      } catch { /* silent */ }
+       if (searchTerm && !selectedItem) {
+        api.get(`/inventory-items/search?q=${encodeURIComponent(searchTerm)}`)
+          .then(res => {
+            setSearchResults(res.data.data || []);
+            setShowDropdown(true);
+          })
+          .catch(() => {
+            setSearchResults([]);
+            setShowDropdown(false);
+          });
+      } else {
+        setShowDropdown(false);
+      }
     }, 300);
-  }, [searchTerm]);
+  }, [searchTerm, selectedItem]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -80,6 +121,7 @@ const ManufacturingDetail = () => {
     setSelectedItem(item);
     setSearchTerm(item.name);
     setShowDropdown(false);
+    if (item.cost_per_unit) setCostInput(item.cost_per_unit);
   };
 
   const handleAddItem = async (e) => {
@@ -89,8 +131,9 @@ const ManufacturingDetail = () => {
     setAddingItem(true);
     try {
       await api.post(`/manufacturing/${id}/items`, {
-        inventory_item_id: selectedItem.id,
+        product_id: selectedItem.id,
         quantity_used: parseFloat(qtyInput),
+        cost: parseFloat(costInput) || 0,
       });
       toast.success(`${selectedItem.name} added to project.`);
       setSearchTerm(""); setSelectedItem(null); setQtyInput("");
@@ -105,7 +148,10 @@ const ManufacturingDetail = () => {
   const handleUpdateBomItem = async (bomItem) => {
     if (!editQty || parseFloat(editQty) <= 0) { toast.error("Enter a valid quantity."); return; }
     try {
-      await api.put(`/manufacturing/${id}/items/${bomItem.id}`, { quantity_used: parseFloat(editQty) });
+      await api.put(`/manufacturing/${id}/items/${bomItem.id}`, { 
+        quantity_used: parseFloat(editQty),
+        cost: parseFloat(editCost) || 0,
+      });
       toast.success("Item updated.");
       setEditingBomId(null);
       fetchProject();
@@ -126,7 +172,7 @@ const ManufacturingDetail = () => {
   };
 
   const handleStatusChange = async (newStatus) => {
-    if (!window.confirm(`Change status to "${newStatus.replace("_", " ")}"? ${newStatus === "closed" ? "This is permanent and will LOCK the project." : ""}`)) return;
+    if (!window.confirm(`Change project status to "${newStatus.replace("_", " ")}"?`)) return;
     setUpdatingStatus(true);
     try {
       await api.put(`/manufacturing/${id}/status`, { status: newStatus });
@@ -161,236 +207,336 @@ const ManufacturingDetail = () => {
   if (!project) return <Layout><div className="card" style={{ textAlign: "center", padding: "4rem" }}><p className="text-muted">Project not found.</p></div></Layout>;
 
   const meta = STATUS_META[project.status] || STATUS_META.not_started;
-  const isClosed = project.status === "closed";
-  const nextStatuses = ALLOWED_TRANSITIONS[project.status] || [];
+  const nextStatuses = Object.keys(STATUS_META).filter(s => s !== project.status);
 
   return (
     <Layout>
-      <div style={{ maxWidth: "1100px", margin: "0 auto" }}>
+      <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "2rem" }}>
 
-        {/* ── Header */}
-        <header className="flex justify-between align-center mb-2" style={{ flexWrap: "wrap", gap: "1rem" }}>
-          <div className="flex align-center gap-1">
-            <button onClick={() => navigate("/admin/manufacturing")} style={{ background: "transparent", border: "1px solid var(--border)", borderRadius: "10px", padding: "0.5rem 1rem", cursor: "pointer", color: "var(--text-muted)", fontWeight: 700, fontSize: "0.8rem" }}>
-              ← Back
+        {/* ── Top Navigation & Title ── */}
+        <header className="flex justify-between align-center mb-3" style={{ flexWrap: "wrap", gap: "1.5rem" }}>
+          <div className="flex align-center gap-1-5">
+            <button 
+              onClick={() => navigate("/admin/manufacturing")} 
+              className="btn-icon-back"
+              style={{ 
+                background: "white", 
+                border: "1px solid rgba(10,36,99,0.1)", 
+                borderRadius: "14px", 
+                width: "45px", 
+                height: "45px", 
+                display: "flex", 
+                alignItems: "center", 
+                justifyContent: "center",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.03)"
+              }}
+            >
+              ←
             </button>
             <div>
-              <div className="flex align-center gap-1">
-                <h1 style={{ fontSize: "1.5rem" }}>{project.machine_name}</h1>
-                <span style={{ padding: "0.25rem 0.75rem", borderRadius: "20px", fontSize: "0.72rem", fontWeight: 800, color: meta.color, background: meta.bg, border: `1px solid ${meta.color}` }}>
+              <div className="flex align-center gap-1" style={{ flexWrap: "wrap" }}>
+                <h1 style={{ fontSize: "2.2rem", fontWeight: 900, letterSpacing: "-1.5px" }}>{project.machine_name}</h1>
+                {(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) && (
+                  <button onClick={() => setShowEditModal(true)} style={{ background: "rgba(10,36,99,0.04)", border: "none", cursor: "pointer", fontSize: "1rem", padding: "0.5rem", borderRadius: "10px", transition: "0.2s" }} title="Edit Machine Info">
+                    ✏️
+                  </button>
+                )}
+                <div style={{ 
+                  padding: "0.4rem 1.2rem", 
+                  borderRadius: "14px", 
+                  fontSize: "0.75rem", 
+                  fontWeight: 900, 
+                  color: meta.color, 
+                  background: meta.bg, 
+                  border: `1px solid ${meta.color}22`,
+                  letterSpacing: "1px"
+                }}>
                   {meta.label.toUpperCase()}
-                </span>
+                </div>
               </div>
-              <p className="text-muted" style={{ fontSize: "0.85rem" }}>
-                Created {new Date(project.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
+              <p className="text-muted" style={{ fontSize: "0.9rem", marginTop: "0.4rem", fontWeight: 500 }}>
+                Project Manifest • Initialized by <b>{project.creator_name || "System"}</b> on {new Date(project.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
               </p>
             </div>
           </div>
-          {project.status === "closed" && (
-            <button onClick={handleDownloadPdf} disabled={downloadingPdf} style={{ background: "var(--primary)", color: "white", border: "none", borderRadius: "12px", padding: "0.75rem 1.5rem", fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 15px rgba(10,36,99,0.25)" }}>
-              {downloadingPdf ? "Generating..." : "⤓ Download Report"}
+
+          {(project.items?.length > 0) && (
+            <button 
+              onClick={handleDownloadPdf} 
+              disabled={downloadingPdf} 
+              style={{ 
+                background: "linear-gradient(135deg, var(--primary) 0%, #1e40af 100%)", 
+                color: "white", 
+                padding: "1rem 2rem", 
+                borderRadius: "18px", 
+                fontWeight: 800,
+                boxShadow: "0 15px 35px rgba(37,99,235,0.25)"
+              }}
+            >
+              {downloadingPdf ? "Synthesizing Report..." : "⤓ EXPORT PDF DOSSIER"}
             </button>
           )}
         </header>
 
-        {/* ── Info + Status row */}
-        <div className="flex gap-1 mb-2" style={{ flexWrap: "wrap" }}>
-          {/* Notes card */}
-          <div className="card" style={{ flex: 2, minWidth: "280px" }}>
-            <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-muted)", marginBottom: "0.5rem" }}>NOTES</p>
-            <p style={{ lineHeight: 1.6 }}>{project.note || <span className="text-muted">No notes.</span>}</p>
-          </div>
-
-          {/* Total cost card */}
-          <div className="card" style={{ flex: 1, minWidth: "200px", textAlign: "center", borderLeft: "4px solid var(--primary)" }}>
-            <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-muted)", marginBottom: "0.5rem" }}>TOTAL PROJECT COST</p>
-            <p style={{ fontSize: "2rem", fontWeight: 900, color: "var(--primary)" }}>
-              ₹ {parseFloat(project.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+        {/* ── Summary Matrix ── */}
+        <div style={{ 
+          display: "grid", 
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", 
+          gap: "1.5rem", 
+          marginBottom: "2.5rem" 
+        }}>
+          {/* Notes Segment */}
+          <div className="card glass-card-premium" style={{ borderLeft: "6px solid #cbd5e1" }}>
+            <p className="label-sm">OPERATIONAL PROTOCOL</p>
+            <p style={{ fontSize: "1rem", lineHeight: 1.7, color: "var(--text-main)" }}>
+              {project.note || <span className="text-muted italic">No specific operational notes recorded for this run.</span>}
             </p>
           </div>
 
-          {/* Status panel */}
-          {!isClosed && nextStatuses.length > 0 && (
-            <div className="card" style={{ flex: 1, minWidth: "200px" }}>
-              <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-muted)", marginBottom: "0.75rem" }}>UPDATE STATUS</p>
-              {nextStatuses.map(s => {
-                const m = STATUS_META[s];
-                return (
-                  <button key={s} onClick={() => handleStatusChange(s)} disabled={updatingStatus}
-                    style={{ width: "100%", padding: "0.65rem", border: `1px solid ${m.color}`, background: m.bg, color: m.color, borderRadius: "10px", fontWeight: 800, cursor: "pointer", fontSize: "0.82rem" }}>
-                    {updatingStatus ? "Updating..." : `→ Mark as ${m.label}`}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {/* Budget Segment */}
+          <div className="card glass-card-premium" style={{ borderLeft: "6px solid #3b82f6" }}>
+            <p className="label-sm">BUDGET ALLOCATION</p>
+            <p style={{ fontSize: "1.8rem", fontWeight: 900, color: "var(--primary)" }}>
+              ₹ {parseFloat(project.budget || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+            </p>
+          </div>
 
-          {isClosed && (
-            <div className="card" style={{ flex: 1, minWidth: "200px", textAlign: "center", borderLeft: "4px solid #16a34a" }}>
-              <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "#16a34a", marginBottom: "0.5rem" }}>🔒 PROJECT CLOSED</p>
-              <p className="text-muted" style={{ fontSize: "0.82rem" }}>This project is locked. Download the PDF report above.</p>
+          {/* Status Segment */}
+          <div className="card glass-card-premium" style={{ borderLeft: `6px solid ${meta.color}` }}>
+            <p className="label-sm">LIFECYCLE CONTROL</p>
+            <div style={{ marginTop: "1rem" }}>
+              {(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) ? (
+                nextStatuses.map(s => {
+                  const m = STATUS_META[s];
+                  return (
+                    <button key={s} onClick={() => handleStatusChange(s)} disabled={updatingStatus}
+                      className="btn-status-transition"
+                      style={{ background: m.bg, color: m.color, border: `1px solid ${m.color}33`, marginRight: "0.5rem", marginBottom: "0.5rem" }}>
+                      {updatingStatus ? "Processing..." : `SET TO ${m.label.toUpperCase()}`}
+                    </button>
+                  );
+                })
+              ) : (
+                <p className="text-muted italic" style={{ fontSize: "0.9rem" }}>Only the creator or an admin can transition status.</p>
+              )}
             </div>
-          )}
+          </div>
         </div>
 
-        {/* ── Add Item Section */}
-        {!isClosed && (
-          <div className="card mb-2" style={{ borderLeft: "4px solid var(--primary)" }}>
-            <h2 style={{ marginBottom: "1rem" }}>Add Item to Project</h2>
-            <form onSubmit={handleAddItem}>
-              <div className="flex gap-1 align-center" style={{ flexWrap: "wrap" }}>
-                {/* Search */}
-                <div style={{ flex: 2, minWidth: "240px", position: "relative" }} ref={searchRef}>
-                  <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "0.75rem", fontWeight: 700, color: "var(--text-muted)" }}>SEARCH INVENTORY ITEM</label>
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={e => { setSearchTerm(e.target.value); setSelectedItem(null); }}
-                    placeholder="Type item name..."
-                  />
-                  {showDropdown && searchResults.length > 0 && (
-                    <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "white", border: "1px solid var(--border)", borderRadius: "12px", boxShadow: "0 8px 30px rgba(0,0,0,0.12)", zIndex: 200, overflow: "hidden" }}>
-                      {searchResults.map(item => (
-                        <div key={item.id} onMouseDown={() => selectSearchItem(item)}
-                          style={{ padding: "0.75rem 1rem", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border)", transition: "background 0.15s" }}
-                          onMouseEnter={e => e.currentTarget.style.background = "var(--bg-main)"}
-                          onMouseLeave={e => e.currentTarget.style.background = "white"}>
+        {/* ── BOM Management Segment ── */}
+        <div style={{ display: "grid", gridTemplateColumns: (!(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id)) ? "1fr" : "minmax(0, 400px) 1fr", gap: "2rem", alignItems: "start" }}>
+          
+          {/* Add Item Form (Only if user has access) */}
+          {(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) && (
+            <div className="card" style={{ padding: "2.5rem", borderRadius: "28px", background: "white", position: "sticky", top: "2rem" }}>
+              <h2 style={{ fontSize: "1.4rem", fontWeight: 900, marginBottom: "1.5rem", letterSpacing: "-0.5px" }}>Resource Depletion</h2>
+              <form onSubmit={handleAddItem} className="flex flex-column gap-1-5">
+                <div style={{ position: "relative" }} ref={searchRef}>
+                  <label className="label-sm">SELECT INVENTORY ASSET</label>
+                  <div style={{ position: "relative" }}>
+                    <span style={{ position: "absolute", left: "15px", top: "50%", transform: "translateY(-50%)", opacity: 0.4 }}>🔍</span>
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={e => { setSearchTerm(e.target.value); setSelectedItem(null); }}
+                      placeholder="Search catalog..."
+                      style={{ paddingLeft: "45px", borderRadius: "14px", height: "3.5rem" }}
+                    />
+                  </div>
+                  {showDropdown && (
+                    <div className="search-dropdown animate-fade-in">
+                      {searchResults.length > 0 ? searchResults.map(item => (
+                        <div key={item.id} onMouseDown={() => selectSearchItem(item)} className="search-item">
                           <div>
-                            <div style={{ fontWeight: 700, fontSize: "0.88rem" }}>{item.name}</div>
-                            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>{item.category === "spare_part" ? "Spare Part" : "Raw Material"} · {item.unit} · ₹{parseFloat(item.cost_per_unit).toFixed(2)}/unit</div>
+                            <div className="search-item-title">{item.name}</div>
+                            <div className="search-item-meta">{item.category === "spare_part" ? "Spare Part" : "Raw Material"} • {item.unit}</div>
                           </div>
-                          <span style={{ fontSize: "0.78rem", fontWeight: 700, color: parseFloat(item.quantity) < 10 ? "var(--accent)" : "var(--success)" }}>
-                            {parseFloat(item.quantity)} {item.unit} avail.
-                          </span>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontWeight: 800, color: parseFloat(item.quantity) < 20 ? "var(--accent)" : "var(--success)" }}>{parseFloat(item.quantity)} {item.unit}</div>
+                            <div style={{ fontSize: "0.65rem", fontWeight: 700, color: "var(--text-muted)" }}>AVAILABLE</div>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                  {showDropdown && searchResults.length === 0 && searchTerm.trim() && (
-                    <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "white", border: "1px solid var(--border)", borderRadius: "12px", padding: "1rem", zIndex: 200, textAlign: "center" }} className="text-muted">
-                      No items found.
+                      )) : searchTerm.trim() && (
+                        <div style={{ padding: "2rem", textAlign: "center" }} className="text-muted">No assets match your search.</div>
+                      )}
                     </div>
                   )}
                 </div>
 
-                {/* Quantity */}
-                <div style={{ flex: 1, minWidth: "140px" }}>
-                  <label style={{ display: "block", marginBottom: "0.4rem", fontSize: "0.75rem", fontWeight: 700, color: "var(--text-muted)" }}>
-                    QUANTITY {selectedItem ? `(${selectedItem.unit})` : ""}
-                  </label>
+                <div>
+                  <label className="label-sm">DEPLETION QUANTITY {selectedItem ? `(${selectedItem.unit})` : ""}</label>
                   <input
                     type="number" min="0.01" step="0.01"
                     value={qtyInput}
                     onChange={e => setQtyInput(e.target.value)}
-                    placeholder="0"
-                    max={selectedItem ? selectedItem.quantity : undefined}
+                    placeholder="Enter units used..."
+                    disabled={!selectedItem}
+                    style={{ borderRadius: "14px", height: "3.5rem" }}
                   />
                 </div>
 
-                {/* Selected preview */}
-                {selectedItem && (
-                  <div style={{ padding: "0.5rem 1rem", background: "rgba(10,36,99,0.06)", borderRadius: "10px", fontSize: "0.8rem" }}>
-                    <div style={{ fontWeight: 700 }}>{selectedItem.name}</div>
-                    <div className="text-muted">₹{parseFloat(selectedItem.cost_per_unit).toFixed(2)}/unit · {parseFloat(selectedItem.quantity)} avail.</div>
-                    {qtyInput && <div style={{ fontWeight: 800, color: "var(--primary)", marginTop: "0.25rem" }}>Cost: ₹ {(parseFloat(qtyInput) * parseFloat(selectedItem.cost_per_unit)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</div>}
-                  </div>
-                )}
-
-                <div style={{ alignSelf: "flex-end" }}>
-                  <button type="submit" disabled={addingItem || !selectedItem} style={{ padding: "0.75rem 1.5rem" }}>
-                    {addingItem ? "Adding..." : "Add to Project"}
-                  </button>
+                <div>
+                  <label className="label-sm">UNIT COST (₹)</label>
+                  <input
+                    type="number" min="0" step="0.01"
+                    value={costInput}
+                    onChange={e => setCostInput(e.target.value)}
+                    placeholder="Enter cost per unit..."
+                    disabled={!selectedItem}
+                    style={{ borderRadius: "14px", height: "3.5rem" }}
+                  />
                 </div>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {/* ── Bill of Materials Table */}
-        <div className="card">
-          <div className="flex justify-between align-center mb-2">
-            <h2>Bill of Materials</h2>
-            <span style={{ fontSize: "0.78rem", fontWeight: 700, background: "var(--bg-main)", padding: "0.3rem 0.8rem", borderRadius: "20px" }}>
-              {project.items?.length || 0} items
-            </span>
-          </div>
-          <div style={{ overflowX: "auto" }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Item Name</th>
-                  <th>Category</th>
-                  <th style={{ textAlign: "right" }}>Qty Used</th>
-                  <th style={{ textAlign: "right" }}>Cost / Unit</th>
-                  <th style={{ textAlign: "right" }}>Total Cost</th>
-                  {!isClosed && <th style={{ textAlign: "right" }}>Actions</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {!project.items || project.items.length === 0 ? (
-                  <tr><td colSpan={isClosed ? 6 : 7} style={{ textAlign: "center", padding: "3rem" }} className="text-muted">
-                    No items added yet.
-                  </td></tr>
-                ) : project.items.map((item, idx) => (
-                  <tr key={item.id}>
-                    <td className="text-muted" style={{ fontSize: "0.8rem" }}>{idx + 1}</td>
-                    <td style={{ fontWeight: 700 }}>{item.item_name}</td>
-                    <td>
-                      <span style={{ padding: "0.2rem 0.5rem", borderRadius: "15px", fontSize: "0.7rem", fontWeight: 700,
-                        background: item.category === "spare_part" ? "rgba(99,102,241,0.1)" : "rgba(16,185,129,0.1)",
-                        color: item.category === "spare_part" ? "#6366f1" : "var(--success)" }}>
-                        {item.category === "spare_part" ? "Spare Part" : "Raw Material"}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {editingBomId === item.id ? (
-                        <input type="number" min="0.01" step="0.01" value={editQty} onChange={e => setEditQty(e.target.value)}
-                          style={{ width: "90px", textAlign: "right", padding: "0.3rem 0.5rem" }} autoFocus />
-                      ) : (
-                        <span style={{ fontWeight: 700 }}>{parseFloat(item.quantity_used).toLocaleString("en-IN")} {item.unit}</span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>₹ {parseFloat(item.cost_per_unit).toFixed(2)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 800, color: "var(--primary)" }}>
-                      ₹ {parseFloat(item.cost).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                    </td>
-                    {!isClosed && (
-                      <td style={{ textAlign: "right" }}>
-                        <div className="flex justify-end gap-1">
-                          {editingBomId === item.id ? (
-                            <>
-                              <button onClick={() => handleUpdateBomItem(item)} style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", background: "var(--success)", color: "white", border: "none", borderRadius: "7px", cursor: "pointer" }}>Save</button>
-                              <button onClick={() => setEditingBomId(null)} style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", background: "#888", color: "white", border: "none", borderRadius: "7px", cursor: "pointer" }}>Cancel</button>
-                            </>
-                          ) : (
-                            <>
-                              <button onClick={() => { setEditingBomId(item.id); setEditQty(item.quantity_used); }} style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", background: "var(--primary)", color: "white", border: "none", borderRadius: "7px", cursor: "pointer" }}>Edit</button>
-                              <button onClick={() => handleRemoveBomItem(item)} style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", background: "var(--accent)", color: "white", border: "none", borderRadius: "7px", cursor: "pointer" }}>Remove</button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Grand Total Footer */}
-          {project.items && project.items.length > 0 && (
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1rem", paddingTop: "1rem", borderTop: "2px solid var(--border)" }}>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text-muted)", marginBottom: "0.25rem" }}>GRAND TOTAL</div>
-                <div style={{ fontSize: "1.75rem", fontWeight: 900, color: "var(--primary)" }}>
-                  ₹ {parseFloat(project.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                </div>
-              </div>
+                <button type="submit" disabled={addingItem || !selectedItem} style={{ height: "4rem", borderRadius: "18px", fontWeight: 900, marginTop: "0.5rem" }}>
+                  {addingItem ? "Depleting Stock..." : "ADD TO BILL OF MATERIALS"}
+                </button>
+              </form>
             </div>
           )}
+
+          {/* BOM Table */}
+          <div className="card" style={{ padding: "2.5rem", borderRadius: "28px", background: "white" }}>
+            <div className="flex justify-between align-center mb-2">
+              <h2 style={{ fontSize: "1.4rem", fontWeight: 900, letterSpacing: "-0.5px" }}>Bill of Materials</h2>
+              <span style={{ fontSize: "0.75rem", fontWeight: 800, background: "rgba(10,36,99,0.04)", padding: "0.4rem 1rem", borderRadius: "12px", color: "var(--primary)" }}>
+                {project.items?.length || 0} RESOURCES REGISTERED
+              </span>
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              <table className="bom-table">
+                <thead>
+                  <tr>
+                    <th>ASSET IDENTITY</th>
+                    <th style={{ textAlign: "right" }}>QUANTITY</th>
+                    {(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) && <th style={{ textAlign: "center" }}>CONTROLS</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {!project.items || project.items.length === 0 ? (
+                    <tr>
+                      <td colSpan={(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) ? 3 : 2} style={{ textAlign: "center", padding: "5rem" }}>
+                        <div style={{ fontSize: "3rem", marginBottom: "1rem", opacity: 0.2 }}>📦</div>
+                        <p className="text-muted" style={{ fontWeight: 600 }}>No materials registered for this project run.</p>
+                      </td>
+                    </tr>
+                  ) : project.items.map((item) => (
+                    <tr key={item.id}>
+                      <td>
+                        <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text-main)" }}>{item.item_name}</div>
+                        <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginTop: "0.2rem" }}>
+                          {item.category?.replace('_', ' ')} • {item.unit}
+                        </div>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        {editingBomId === item.id ? (
+                          <div className="flex flex-column gap-0-5">
+                            <input type="number" min="0.01" step="0.01" value={editQty} onChange={e => setEditQty(e.target.value)}
+                              className="inline-edit-input" placeholder="Qty" autoFocus />
+                            <input type="number" min="0" step="0.01" value={editCost} onChange={e => setEditCost(e.target.value)}
+                              className="inline-edit-input" placeholder="Cost" />
+                          </div>
+                        ) : (
+                          <span style={{ fontWeight: 900, color: "var(--primary)", fontSize: "1.1rem" }}>{parseFloat(item.quantity_used).toLocaleString("en-IN")} <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>{item.unit}</span></span>
+                        )}
+                      </td>
+                      {(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) && (
+                        <td style={{ textAlign: "center" }}>
+                          <div className="flex justify-center gap-0-5">
+                            {editingBomId === item.id ? (
+                              <>
+                                <button onClick={() => handleUpdateBomItem(item)} className="btn-table-success" title="Save Changes">✓</button>
+                                <button onClick={() => setEditingBomId(null)} className="btn-table-cancel" title="Cancel Editing">✕</button>
+                              </>
+                            ) : (
+                              <>
+                                <button onClick={() => { setEditingBomId(item.id); setEditQty(item.quantity_used); setEditCost(item.cost); }} className="btn-table-edit" title="Adjust Quantity">✏️</button>
+                                <button onClick={() => handleRemoveBomItem(item)} className="btn-table-danger" title="Redact Resource">🗑️</button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {project.items && project.items.length > 0 && (
+              <div style={{ marginTop: "2rem", paddingTop: "2rem", borderTop: "2px solid rgba(10,36,99,0.04)", display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ textAlign: "right" }}>
+                  <p className="label-sm">AGGREGATE PROJECT VALUE</p>
+                  <p style={{ fontSize: "2.2rem", fontWeight: 950, color: "var(--primary)", letterSpacing: "-1.5px" }}>
+                    ₹ {parseFloat(project.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* ── Edit Project Modal ── */}
+        {showEditModal && (
+          <div className="modal-overlay">
+            <div className="card modal-content animate-scale-up">
+              <h2 style={{ fontSize: "1.8rem", fontWeight: 900, marginBottom: "0.5rem", letterSpacing: "-1px" }}>Project <span className="text-primary">Recalibration</span></h2>
+              <p className="text-muted mb-2">Update machine identifier or operational notes.</p>
+              
+              <form onSubmit={handleUpdateProject} className="flex flex-column gap-2">
+                <div>
+                  <label className="label-sm">MACHINE IDENTIFIER</label>
+                  <input type="text" value={editForm.machine_name} onChange={e => setEditForm({ ...editForm, machine_name: e.target.value })} required style={{ borderRadius: "14px", height: "3.5rem" }} />
+                </div>
+                <div>
+                  <label className="label-sm">PROJECT BUDGET (₹)</label>
+                  <input type="number" value={editForm.budget} onChange={e => setEditForm({ ...editForm, budget: e.target.value })} style={{ borderRadius: "14px", height: "3.5rem" }} />
+                </div>
+                <div>
+                  <label className="label-sm">OPERATIONAL NOTES</label>
+                  <textarea value={editForm.note} onChange={e => setEditForm({ ...editForm, note: e.target.value })} style={{ height: "120px", borderRadius: "14px" }} />
+                </div>
+
+                <div className="flex gap-1 justify-end mt-1">
+                  <button type="button" onClick={() => setShowEditModal(false)} className="btn-ghost">ABORT</button>
+                  <button type="submit" disabled={savingProject} style={{ padding: "1rem 2rem", borderRadius: "14px", fontWeight: 900 }}>
+                    {savingProject ? "SAVING..." : "UPDATE PROJECT"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
+
+      <style>{`
+        .label-sm { font-size: 0.7rem; font-weight: 800; color: var(--text-muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 0.75rem; display: block; }
+        .glass-card-premium { background: rgba(255,255,255,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.4); border-radius: 28px; padding: 2rem; box-shadow: 0 10px 30px rgba(0,0,0,0.02); }
+        .btn-status-transition { width: 100%; padding: 0.8rem; border-radius: 14px; font-weight: 900; cursor: pointer; transition: 0.3s; font-size: 0.8rem; letter-spacing: 0.5px; }
+        .btn-status-transition:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); filter: brightness(1.05); }
+        .search-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: white; border-radius: 18px; box-shadow: 0 20px 50px rgba(0,0,0,0.15); z-index: 1000; overflow: hidden; margin-top: 8px; border: 1px solid rgba(0,0,0,0.05); }
+        .search-item { padding: 1rem 1.5rem; display: flex; justify-content: space-between; align-items: center; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.03); transition: 0.2s; }
+        .search-item:hover { background: var(--bg-main); }
+        .search-item-title { font-weight: 800; color: var(--text-main); font-size: 0.95rem; }
+        .search-item-meta { font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; margin-top: 0.2rem; }
+        .selected-item-preview { padding: 1.5rem; background: rgba(10,36,99,0.04); border-radius: 18px; border: 1px dashed rgba(10,36,99,0.1); }
+        .bom-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        .bom-table th { padding: 1.25rem 1rem; border-bottom: 2px solid rgba(10,36,99,0.05); font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+        .bom-table td { padding: 1.5rem 1rem; border-bottom: 1px solid rgba(10,36,99,0.03); vertical-align: middle; }
+        .bom-table tr:last-child td { border-bottom: none; }
+        .inline-edit-input { width: 100px; padding: 0.5rem; border-radius: 8px; border: 2px solid var(--primary); text-align: right; font-weight: 900; outline: none; }
+        .btn-table-edit { background: rgba(10,36,99,0.05); border: none; padding: 0.6rem; border-radius: 10px; cursor: pointer; transition: 0.2s; }
+        .btn-table-danger { background: rgba(225, 29, 72, 0.05); border: none; padding: 0.6rem; border-radius: 10px; cursor: pointer; color: var(--accent); transition: 0.2s; }
+        .btn-table-success { background: var(--success); color: white; border: none; padding: 0.6rem; border-radius: 10px; cursor: pointer; }
+        .btn-table-cancel { background: #888; color: white; border: none; padding: 0.6rem; border-radius: 10px; cursor: pointer; }
+        .btn-table-edit:hover, .btn-table-danger:hover { transform: scale(1.15); }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(10,36,99,0.4); backdrop-filter: blur(15px); display: flex; alignItems: center; justifyContent: center; z-index: 2000; padding: 1.5rem; }
+        .modal-content { width: 100%; maxWidth: 500px; padding: 3rem; borderRadius: 32px; background: white; box-shadow: 0 40px 100px rgba(0,0,0,0.3); }
+        .btn-ghost { background: none; border: none; color: var(--text-muted); font-weight: 800; cursor: pointer; padding: 1rem 1.5rem; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes scaleUp { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out; }
+        .animate-scale-up { animation: scaleUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+      `}</style>
     </Layout>
   );
 };

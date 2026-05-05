@@ -1,77 +1,116 @@
-const ApiResponse = require('../utils/ApiResponse');
 const ManufacturingProjectRepository = require('../repositories/ManufacturingProjectRepository');
 const ManufacturingItemRepository = require('../repositories/ManufacturingItemRepository');
 const InventoryItemRepository = require('../repositories/InventoryItemRepository');
 const ManufacturingService = require('../services/ManufacturingService');
-const knex = require('../config/knex');
+const ApiResponse = require('../utils/ApiResponse');
 
-const projectRepo = new ManufacturingProjectRepository(knex);
-const itemRepo = new ManufacturingItemRepository(knex);
-const invItemRepo = new InventoryItemRepository(knex);
-const service = new ManufacturingService(projectRepo, itemRepo, invItemRepo, knex);
+class ManufacturingController {
+  _getService = (req) => {
+    const projectRepo = new ManufacturingProjectRepository(req.knex);
+    const itemRepo = new ManufacturingItemRepository(req.knex);
+    const invItemRepo = new InventoryItemRepository(req.knex); 
+    return new ManufacturingService(projectRepo, itemRepo, invItemRepo, req.knex);
+  };
 
-// ── Projects
-const getAllProjects = async (req, res, next) => {
-  try {
-    const projects = await service.getAllProjects();
-    res.json(ApiResponse.success('Projects retrieved.', projects));
-  } catch (err) { next(err); }
-};
+  _checkInpack = (req) => {
+    if (req.company !== 'impack' && req.company !== 'inpack') {
+      throw { statusCode: 403, message: 'Manufacturing module is exclusive to Inpack Node.' };
+    }
+  };
 
-const createProject = async (req, res, next) => {
-  try {
-    const project = await service.createProject(req.body);
-    res.status(201).json(ApiResponse.success('Project created.', project));
-  } catch (err) { next(err); }
-};
+  getProjects = async (req, res, next) => {
+    try {
+      this._checkInpack(req);
+      const service = this._getService(req);
+      const data = await service.getAllProjects();
+      res.json(ApiResponse.success('Projects retrieved.', data));
+    } catch (err) { next(err); }
+  };
 
-const getProjectDetail = async (req, res, next) => {
-  try {
-    const project = await service.getProjectDetail(req.params.id);
-    res.json(ApiResponse.success('Project detail retrieved.', project));
-  } catch (err) { next(err); }
-};
+  getProject = async (req, res, next) => {
+    try {
+      this._checkInpack(req);
+      const service = this._getService(req);
+      const data = await service.getProjectDetail(req.params.id);
+      res.json(ApiResponse.success('Project details retrieved.', data));
+    } catch (err) { next(err); }
+  };
 
-const updateStatus = async (req, res, next) => {
-  try {
-    const { status } = req.body;
-    const project = await service.updateStatus(req.params.id, status);
-    res.json(ApiResponse.success('Project status updated.', project));
-  } catch (err) { next(err); }
-};
+  createProject = async (req, res, next) => {
+    try {
+      this._checkInpack(req);
+      const service = this._getService(req);
+      const data = await service.createProject(req.body, req.user.id);
+      res.status(201).json(ApiResponse.success('Project created.', data));
+    } catch (err) { next(err); }
+  };
 
-// ── BOM Items
-const addItem = async (req, res, next) => {
-  try {
-    const { inventory_item_id, quantity_used } = req.body;
-    const result = await service.addItemToProject(req.params.id, inventory_item_id, quantity_used);
-    res.status(201).json(ApiResponse.success('Item added to project.', result));
-  } catch (err) { next(err); }
-};
+  updateProject = async (req, res, next) => {
+    try {
+      this._checkInpack(req);
+      const service = this._getService(req);
+      const data = await service.updateProject(req.params.id, req.body, req.user);
+      res.json(ApiResponse.success('Project updated.', data));
+    } catch (err) { next(err); }
+  };
 
-const updateItem = async (req, res, next) => {
-  try {
-    const { quantity_used } = req.body;
-    const result = await service.updateItemInProject(req.params.id, req.params.itemId, quantity_used);
-    res.json(ApiResponse.success('Item updated.', result));
-  } catch (err) { next(err); }
-};
+  updateStatus = async (req, res, next) => {
+    try {
+      this._checkInpack(req);
+      const service = this._getService(req);
+      const data = await service.updateStatus(req.params.id, req.body.status, req.user);
+      res.json(ApiResponse.success('Status updated.', data));
+    } catch (err) { next(err); }
+  };
 
-const removeItem = async (req, res, next) => {
-  try {
-    await service.removeItemFromProject(req.params.id, req.params.itemId);
-    res.json(ApiResponse.success('Item removed from project. Stock restored.'));
-  } catch (err) { next(err); }
-};
+  deleteProject = async (req, res, next) => {
+    try {
+      this._checkInpack(req);
+      const service = this._getService(req);
+      await service.deleteProject(req.params.id, req.user);
+      res.json(ApiResponse.success('Project and associated records deleted.'));
+    } catch (err) { next(err); }
+  };
 
-// ── PDF Report
-const downloadReport = async (req, res, next) => {
-  try {
-    const pdfBuffer = await service.generatePdfReport(req.params.id);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="inpack-report-${req.params.id}.pdf"`);
-    res.send(pdfBuffer);
-  } catch (err) { next(err); }
-};
+  addItem = async (req, res, next) => {
+    try {
+      this._checkInpack(req);
+      const service = this._getService(req);
+      const { product_id, quantity_used, cost } = req.body;
+      const data = await service.addItemToProject(req.params.id, product_id, quantity_used, cost, req.user);
+      res.status(201).json(ApiResponse.success('Item added to project.', data));
+    } catch (err) { next(err); }
+  };
 
-module.exports = { getAllProjects, createProject, getProjectDetail, updateStatus, addItem, updateItem, removeItem, downloadReport };
+  removeItem = async (req, res, next) => {
+    try {
+      this._checkInpack(req);
+      const service = this._getService(req);
+      await service.removeItemFromProject(req.params.id, req.params.itemId, req.user);
+      res.json(ApiResponse.success('Item removed from project.'));
+    } catch (err) { next(err); }
+  };
+
+  updateItem = async (req, res, next) => {
+    try {
+      this._checkInpack(req);
+      const service = this._getService(req);
+      const { quantity_used, cost } = req.body;
+      const data = await service.updateItemQuantity(req.params.id, req.params.itemId, quantity_used, cost, req.user);
+      res.json(ApiResponse.success('Item quantity updated.', data));
+    } catch (err) { next(err); }
+  };
+
+  downloadReport = async (req, res, next) => {
+    try {
+      this._checkInpack(req);
+      const service = this._getService(req);
+      const buffer = await service.generatePdfReport(req.params.id);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=manufacturing-report-${req.params.id}.pdf`);
+      res.send(buffer);
+    } catch (err) { next(err); }
+  };
+}
+
+module.exports = new ManufacturingController();

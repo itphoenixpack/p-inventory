@@ -10,11 +10,10 @@ const Sidebar = () => {
 
     const adminLinks = [
         { path: "/admin", label: "Analytics", icon: "📊" },
-        { path: "/admin/products", label: "Catalog", icon: "📦" },
+        { path: "/admin/products", label: "Item Master", icon: "📦" },
         { path: "/admin/stock", label: "Inventory", icon: "🔄" },
         { path: "/admin/stock/updates", label: "Updates", icon: "📥" },
-        { path: "/admin/inventory-items", label: "Inv. Items", icon: "🗂️" },
-        { path: "/admin/manufacturing", label: "Manufacturing", icon: "🏭" },
+        ...(user?.company === 'inpack' ? [{ path: "/admin/manufacturing", label: "Manufacturing", icon: "🏭" }] : []),
         { path: "/admin/users", label: "Users", icon: "👥" },
     ];
 
@@ -23,6 +22,7 @@ const Sidebar = () => {
         { path: "/user", label: "Warehouse", icon: "🏠" },
         { path: "/admin/products", label: "Catalog", icon: "📦" },
         { path: "/user/stock", label: "Updates", icon: "📥" },
+        ...(user?.company === 'inpack' ? [{ path: "/admin/manufacturing", label: "Manufacturing", icon: "🏭" }] : []),
     ];
 
     const links = isAdmin ? adminLinks : userLinks;
