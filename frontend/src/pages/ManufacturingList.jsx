@@ -23,7 +23,7 @@ const ManufacturingList = () => {
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
-  const [form, setForm] = useState({ machine_name: "", note: "" });
+  const [form, setForm] = useState({ machine_name: "", note: "", budget: "" });
   const [creating, setCreating] = useState(false);
 
   const fetchProjects = async () => {
@@ -66,7 +66,7 @@ const ManufacturingList = () => {
 
   const handleOpenCreate = () => {
     setIsEditing(false);
-    setForm({ machine_name: "", note: "" });
+    setForm({ machine_name: "", note: "", budget: "" });
     setShowModal(true);
   };
 
@@ -76,7 +76,8 @@ const ManufacturingList = () => {
     setSelectedProjectId(project.id);
     setForm({ 
       machine_name: project.machine_name, 
-      note: project.note || ""
+      note: project.note || "",
+      budget: project.budget || ""
     });
     setShowModal(true);
   };
@@ -335,16 +336,16 @@ const ManufacturingList = () => {
 
             <header className="mb-3">
               <h2 style={{ fontSize: "2.2rem", fontWeight: 900, marginBottom: "0.75rem", letterSpacing: "-1.5px" }}>
-                {isEditing ? "Project <span class='text-primary'>Edit</span>" : "Commence <span class='text-primary'>Batch</span>"}
+                {isEditing ? <>System <span className="text-primary">Calibration</span></> : <>Commence <span className="text-primary">Batch</span></>}
               </h2>
               <p className="text-muted" style={{ fontSize: "1rem", lineHeight: 1.5 }}>
-                {isEditing ? "Modify the operational machine identity or batch notes." : "Initialize a new manufacturing lifecycle to track resource depletion."}
+                {isEditing ? "Modify the operational machine identity, budget allocation, or batch notes." : "Initialize a new manufacturing lifecycle to track resource depletion."}
               </p>
             </header>
 
             <form onSubmit={handleSubmit} className="flex flex-column gap-2">
               <div>
-                <label style={{ display: "block", marginBottom: "0.8rem", fontSize: "0.8rem", fontWeight: 800, color: "var(--primary)", letterSpacing: "1px" }}>MACHINE IDENTIFIER</label>
+                <label style={{ display: "block", marginBottom: "0.8rem", fontSize: "0.8rem", fontWeight: 800, color: "var(--primary)", letterSpacing: "1px" }}>SYSTEM IDENTITY</label>
                 <input 
                   type="text" 
                   value={form.machine_name} 
@@ -355,7 +356,18 @@ const ManufacturingList = () => {
                 />
               </div>
               <div>
-                <label style={{ display: "block", marginBottom: "0.8rem", fontSize: "0.8rem", fontWeight: 800, color: "var(--primary)", letterSpacing: "1px" }}>OPERATIONAL NOTES</label>
+                <label style={{ display: "block", marginBottom: "0.8rem", fontSize: "0.8rem", fontWeight: 800, color: "var(--primary)", letterSpacing: "1px" }}>BUDGET ALLOCATION (₹)</label>
+                <input 
+                  type="number" 
+                  value={form.budget} 
+                  onChange={e => setForm({ ...form, budget: e.target.value })} 
+                  placeholder="0.00" 
+                  step="0.01"
+                  style={{ padding: "1.4rem", borderRadius: "20px", border: "2px solid rgba(10,36,99,0.08)", fontSize: "1.1rem" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", marginBottom: "0.8rem", fontSize: "0.8rem", fontWeight: 800, color: "var(--primary)", letterSpacing: "1px" }}>OPERATIONAL PROTOCOL</label>
                 <textarea 
                   value={form.note} 
                   onChange={e => setForm({ ...form, note: e.target.value })} 

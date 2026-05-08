@@ -29,6 +29,12 @@ class ManufacturingService extends BaseService {
     }
   }
 
+  _checkProjectOpen(project) {
+    if (project.status === 'closed') {
+      throw { statusCode: 403, message: 'This project is closed and cannot be modified. Please re-open it (set status to Active or Not Started) to make changes.' };
+    }
+  }
+
 
   // ──────────────────────────────────────────────────────────────
   // PROJECTS
@@ -87,9 +93,49 @@ class ManufacturingService extends BaseService {
   }
 
   async deleteProject(id, user) {
-    const project = await this.repository.findById(id);
+    const project = await this.repository.findWithItems(id);
+    if (!project) throw { statusCode: 404, message: 'Project not found.' };
     this._checkAccess(project, user);
-    return this.repository.delete(id);
+
+    return this.knex.transaction(async (trx) => {
+      // Restore stock for all items in the project before deleting
+      for (const item of project.items) {
+        // Try to find a stock record to restore to
+        const stockRecord = await trx('stock')
+          .where({ product_id: item.product_id })
+          .first();
+        
+        const targetWarehouse = stockRecord ? stockRecord.warehouse_name : 'Main warehouse';
+        
+        if (stockRecord) {
+          await trx('stock')
+            .where({ id: stockRecord.id })
+            .update({ 
+              quantity: trx.raw('quantity + ?', [parseFloat(item.quantity_used)]),
+              updated_at: trx.fn.now()
+            });
+        } else {
+          await trx('stock').insert({
+            product_id: item.product_id,
+            warehouse_name: targetWarehouse,
+            quantity: parseFloat(item.quantity_used)
+          });
+        }
+
+        // Record transaction
+        await trx('inventory_transactions').insert({
+          product_id: item.product_id,
+          warehouse_name: targetWarehouse,
+          quantity: parseFloat(item.quantity_used),
+          type: 'IN',
+          user_id: user.id,
+          notes: `Restored from deleted Manufacturing Project #${id} (${project.machine_name})`
+        });
+      }
+
+      // Delete the project (cascades to manufacturing_items)
+      return trx('manufacturing_projects').where({ id }).del();
+    });
   }
 
   // ──────────────────────────────────────────────────────────────
@@ -106,6 +152,7 @@ class ManufacturingService extends BaseService {
 
     const project = await this.repository.findById(projectId);
     this._checkAccess(project, user);
+    this._checkProjectOpen(project);
 
     return this.knex.transaction(async (trx) => {
       // 1. Fetch item and total stock
@@ -189,6 +236,7 @@ class ManufacturingService extends BaseService {
   async removeItemFromProject(projectId, bomItemId, user) {
     const project = await this.repository.findById(projectId);
     this._checkAccess(project, user);
+    this._checkProjectOpen(project);
 
     return this.knex.transaction(async (trx) => {
 
@@ -244,6 +292,7 @@ class ManufacturingService extends BaseService {
     
     const project = await this.repository.findById(projectId);
     this._checkAccess(project, user);
+    this._checkProjectOpen(project);
 
     return this.knex.transaction(async (trx) => {
       const bomRow = await this.knex('manufacturing_items')
@@ -340,11 +389,10 @@ class ManufacturingService extends BaseService {
   async generatePdfReport(projectId) {
     const project = await this.repository.findWithItems(projectId);
     if (!project) throw { statusCode: 404, message: 'Project not found.' };
-    if (project.status !== 'closed') {
-      throw { statusCode: 403, message: 'PDF report is only available for closed projects.' };
-    }
 
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
 
     // ── Logo
     const logoPath = path.join(__dirname, '../../..', 'frontend/src/assets/inpack-logo.png');
@@ -354,72 +402,183 @@ class ManufacturingService extends BaseService {
       doc.addImage(base64Logo, 'PNG', 14, 10, 40, 18);
     }
 
-    // ── Header
-    doc.setFontSize(20);
+    // ── Header bar background
+    doc.setFillColor(10, 36, 99);
+    doc.rect(0, 0, pageW, 8, 'F');
+
+    // ── Title
+    doc.setFontSize(18);
     doc.setTextColor(10, 36, 99);
     doc.setFont('helvetica', 'bold');
-    doc.text('Inpack — Manufacturing Report', 60, 20);
+    doc.text('Manufacturing Project Report', 60, 20);
 
-    doc.setFontSize(9);
-    doc.setTextColor(100);
+    doc.setFontSize(8);
+    doc.setTextColor(120);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Generated: ${new Date().toLocaleString('en-IN')}`, 60, 26);
+    doc.text('Inpack Manufacturing System', 60, 26);
+    doc.text(`Generated: ${new Date().toLocaleString('en-IN')}`, 60, 31);
+
+    // ── Status label colour
+    const STATUS_COLORS = {
+      not_started: [107, 114, 128],
+      active:      [37, 99, 235],
+      closed:      [22, 163, 74],
+    };
+    const statusColor = STATUS_COLORS[project.status] || [80, 80, 80];
+    const statusLabel = (project.status || 'not_started').replace('_', ' ').toUpperCase();
 
     // ── Project Info box
     doc.setFillColor(245, 247, 252);
-    doc.roundedRect(14, 34, 182, 28, 3, 3, 'F');
-    doc.setFontSize(10);
-    doc.setTextColor(30);
+    doc.roundedRect(14, 37, 182, 38, 3, 3, 'F');
+    doc.setDrawColor(220, 228, 245);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(14, 37, 182, 38, 3, 3, 'S');
+
+    const labelX = 18;
+    const valueX = 60;
+    const col2LabelX = 118;
+    const col2ValueX = 148;
+
+    doc.setFontSize(9);
+    doc.setTextColor(80);
     doc.setFont('helvetica', 'bold');
-    doc.text('Machine Name:', 18, 43);
+    doc.text('MACHINE / PROJECT', labelX, 45);
     doc.setFont('helvetica', 'normal');
-    doc.text(project.machine_name, 55, 43);
+    doc.setFontSize(11);
+    doc.setTextColor(20);
+    doc.text(project.machine_name || '—', labelX, 52);
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(80);
+    doc.text('STATUS', labelX, 62);
+    doc.setTextColor(...statusColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text(statusLabel, labelX, 69);
+
+    doc.setTextColor(80);
+    doc.setFont('helvetica', 'bold');
+    doc.text('CREATED BY', col2LabelX, 45);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(20);
+    doc.text(project.creator_name || '—', col2LabelX, 52);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('Status:', 18, 51);
+    doc.setTextColor(80);
+    doc.text('DATE', col2LabelX, 62);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(22, 163, 74);
-    doc.text('CLOSED', 55, 51);
+    doc.setTextColor(20);
+    const dateStr = project.created_at
+      ? new Date(project.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+      : '—';
+    doc.text(dateStr, col2LabelX, 69);
 
-    doc.setTextColor(30);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Notes:', 110, 43);
-    doc.setFont('helvetica', 'normal');
-    const noteText = project.note || '—';
-    doc.text(doc.splitTextToSize(noteText, 80), 128, 43);
+    // ── Operational Notes
+    if (project.note) {
+      doc.setFillColor(255, 251, 235);
+      doc.roundedRect(14, 79, 182, 14, 2, 2, 'F');
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(120, 80, 0);
+      doc.text('OPERATIONAL NOTES:', 18, 85);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(80, 50, 0);
+      doc.text(doc.splitTextToSize(project.note, 160), 18, 90);
+    }
 
     // ── Bill of Materials table
-    doc.setFontSize(11);
+    const tableStartY = project.note ? 97 : 82;
+    doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(10, 36, 99);
-    doc.text('Bill of Materials', 14, 72);
+    doc.text('Bill of Materials', 14, tableStartY);
 
-    const tableRows = project.items.map((item, i) => [
-      i + 1,
-      item.item_name,
-      item.category === 'spare_part' ? 'Spare Part' : 'Raw Material',
-      `${item.quantity_used} ${item.unit || 'pcs'}`,
-    ]);
+    const tableRows = project.items.map((item, i) => {
+      const qty    = parseFloat(item.quantity_used) || 0;
+      const cost   = parseFloat(item.cost) || 0;
+      const amount = qty * cost;
+      return [
+        i + 1,
+        item.item_name || '—',
+        item.category === 'spare_part' ? 'Spare Part' : 'Raw Material',
+        item.unit || 'pcs',
+        qty.toLocaleString('en-IN'),
+        cost > 0 ? `Rs. ${cost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—',
+        amount > 0 ? `Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—',
+      ];
+    });
 
     autoTable.default(doc, {
-      startY: 76,
-      head: [['#', 'Item Name', 'Category', 'Qty Used']],
+      startY: tableStartY + 4,
+      head: [['#', 'Item Name', 'Category', 'Unit', 'Qty Used', 'Unit Cost', 'Amount']],
       body: tableRows,
       theme: 'grid',
-      headStyles: { fillColor: [10, 36, 99], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-      bodyStyles: { fontSize: 9, textColor: 30 },
+      headStyles: { fillColor: [10, 36, 99], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8, textColor: 30 },
       alternateRowStyles: { fillColor: [245, 247, 252] },
       columnStyles: {
-        0: { cellWidth: 10, halign: 'center' },
+        0: { cellWidth: 8,  halign: 'center' },
+        1: { cellWidth: 55 },
+        2: { cellWidth: 26 },
+        3: { cellWidth: 16, halign: 'center' },
+        4: { cellWidth: 20, halign: 'right' },
+        5: { cellWidth: 26, halign: 'right' },
+        6: { cellWidth: 28, halign: 'right' },
+      },
+      didDrawPage: (data) => {
+        // footer on each page
+        doc.setFontSize(7);
+        doc.setTextColor(160);
+        doc.setFont('helvetica', 'normal');
+        doc.text('Inpack Manufacturing System — Confidential', 14, pageH - 8);
+        doc.text(`Page ${data.pageNumber}`, pageW - 14, pageH - 8, { align: 'right' });
       },
     });
 
-    // ── Footer
-    doc.setFontSize(7);
-    doc.setTextColor(160);
+    // ── Financial Summary
+    const finalY = doc.lastAutoTable.finalY + 8;
+    const budget     = parseFloat(project.budget)     || 0;
+    const totalCost  = parseFloat(project.total_cost) || 0;
+    const variance   = budget - totalCost;
+
+    doc.setFillColor(10, 36, 99);
+    doc.roundedRect(14, finalY, 182, 34, 3, 3, 'F');
+
+    doc.setTextColor(255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('FINANCIAL SUMMARY', 20, finalY + 8);
+
+    // Budget
     doc.setFont('helvetica', 'normal');
-    doc.text('Generated by Inpack Manufacturing System', 14, 285);
-    doc.text(`Page 1`, 196, 285, { align: 'right' });
+    doc.setFontSize(8);
+    doc.setTextColor(180, 210, 255);
+    doc.text('Budget Allocation', 20, finalY + 16);
+    doc.setTextColor(255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`Rs. ${budget.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 20, finalY + 23);
+
+    // Total Cost
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(180, 210, 255);
+    doc.text('Total Project Cost', 80, finalY + 16);
+    doc.setTextColor(255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`Rs. ${totalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 80, finalY + 23);
+
+    // Variance
+    const varianceColor = variance >= 0 ? [134, 239, 172] : [252, 165, 165];
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(180, 210, 255);
+    doc.text('Variance (Budget - Cost)', 148, finalY + 16);
+    doc.setTextColor(...varianceColor);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`Rs. ${variance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 148, finalY + 23);
 
     return Buffer.from(doc.output('arraybuffer'));
   }

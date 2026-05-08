@@ -53,3 +53,11 @@
 
 - **Git author rewrite** — Rewrote author/committer info on 8 commits to correct attribution. Force-pushed `main` and `claude/git-author-setup-IoSrq`.
 - **Branch protection** — Enabled branch protection rules on `main`: require PR with 1 approval, dismiss stale reviews, block force pushes, restrict deletions.
+
+---
+
+## 2026-05-06
+
+- **Manufacturing Stabilization & Stock Integrity** — Implemented automatic stock restoration on project deletion to prevent inventory loss. Enforced immutability for closed projects to maintain data audit trails.
+- **Enhanced Quantity Precision** — Migrated stock and transaction schemas to `decimal(15, 2)` to support high-precision tracking for raw materials (kg, meters, etc.).
+- **Premium UI Refinement (Manufacturing)** — Polished core metadata editing experience with consistent fields (budget, notes) across list and detail views. Fixed heading rendering bugs and implemented "System Calibration" terminology for industrial feel.

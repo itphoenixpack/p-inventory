@@ -208,6 +208,8 @@ const ManufacturingDetail = () => {
 
   const meta = STATUS_META[project.status] || STATUS_META.not_started;
   const nextStatuses = Object.keys(STATUS_META).filter(s => s !== project.status);
+  const isClosed = project.status === 'closed';
+  const hasAccess = user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id;
 
   return (
     <Layout>
@@ -270,10 +272,17 @@ const ManufacturingDetail = () => {
                 padding: "1rem 2rem", 
                 borderRadius: "18px", 
                 fontWeight: 800,
-                boxShadow: "0 15px 35px rgba(37,99,235,0.25)"
+                boxShadow: "0 15px 35px rgba(37,99,235,0.25)",
+                border: "none",
+                cursor: downloadingPdf ? "wait" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.6rem",
+                fontSize: "0.85rem",
+                letterSpacing: "0.5px"
               }}
             >
-              {downloadingPdf ? "Synthesizing Report..." : "⤓ EXPORT PDF DOSSIER"}
+              {downloadingPdf ? "⏳ Generating..." : "⤓ DOWNLOAD PDF REPORT"}
             </button>
           )}
         </header>
@@ -327,10 +336,20 @@ const ManufacturingDetail = () => {
         <div style={{ display: "grid", gridTemplateColumns: (!(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id)) ? "1fr" : "minmax(0, 400px) 1fr", gap: "2rem", alignItems: "start" }}>
           
           {/* Add Item Form (Only if user has access) */}
-          {(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) && (
-            <div className="card" style={{ padding: "2.5rem", borderRadius: "28px", background: "white", position: "sticky", top: "2rem" }}>
-              <h2 style={{ fontSize: "1.4rem", fontWeight: 900, marginBottom: "1.5rem", letterSpacing: "-0.5px" }}>Resource Depletion</h2>
-              <form onSubmit={handleAddItem} className="flex flex-column gap-1-5">
+          {hasAccess && (
+            <div className="card" style={{ padding: "2.5rem", borderRadius: "28px", background: "white", position: "sticky", top: "2rem", opacity: isClosed ? 0.6 : 1 }}>
+              <div className="flex justify-between align-center mb-1-5">
+                <h2 style={{ fontSize: "1.4rem", fontWeight: 900, letterSpacing: "-0.5px" }}>Resource Depletion</h2>
+                {isClosed && <span style={{ fontSize: "0.65rem", fontWeight: 900, color: "var(--accent)", background: "rgba(225,29,72,0.1)", padding: "0.3rem 0.8rem", borderRadius: "8px" }}>LOCKED</span>}
+              </div>
+              
+              {isClosed ? (
+                <div style={{ padding: "1rem", borderRadius: "14px", background: "rgba(0,0,0,0.03)", border: "1px dashed rgba(0,0,0,0.1)", marginBottom: "1.5rem" }}>
+                  <p className="text-muted" style={{ fontSize: "0.85rem", fontWeight: 600 }}>This project is closed. Re-open it to add resources.</p>
+                </div>
+              ) : null}
+
+              <form onSubmit={handleAddItem} className="flex flex-column gap-1-5" style={{ pointerEvents: isClosed ? "none" : "auto" }}>
                 <div style={{ position: "relative" }} ref={searchRef}>
                   <label className="label-sm">SELECT INVENTORY ASSET</label>
                   <div style={{ position: "relative" }}>
@@ -407,39 +426,67 @@ const ManufacturingDetail = () => {
                 <thead>
                   <tr>
                     <th>ASSET IDENTITY</th>
-                    <th style={{ textAlign: "right" }}>QUANTITY</th>
+                    <th style={{ textAlign: "center" }}>UNIT</th>
+                    <th style={{ textAlign: "right" }}>QTY USED</th>
+                    <th style={{ textAlign: "right" }}>UNIT COST</th>
+                    <th style={{ textAlign: "right" }}>AMOUNT</th>
                     {(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) && <th style={{ textAlign: "center" }}>CONTROLS</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {!project.items || project.items.length === 0 ? (
                     <tr>
-                      <td colSpan={(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) ? 3 : 2} style={{ textAlign: "center", padding: "5rem" }}>
+                      <td colSpan={(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) ? 6 : 5} style={{ textAlign: "center", padding: "5rem" }}>
                         <div style={{ fontSize: "3rem", marginBottom: "1rem", opacity: 0.2 }}>📦</div>
                         <p className="text-muted" style={{ fontWeight: 600 }}>No materials registered for this project run.</p>
                       </td>
                     </tr>
-                  ) : project.items.map((item) => (
+                  ) : project.items.map((item) => {
+                    const qty    = parseFloat(item.quantity_used) || 0;
+                    const cost   = parseFloat(item.cost)          || 0;
+                    const amount = qty * cost;
+                    return (
                     <tr key={item.id}>
                       <td>
                         <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text-main)" }}>{item.item_name}</div>
                         <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginTop: "0.2rem" }}>
-                          {item.category?.replace('_', ' ')} • {item.unit}
+                          {item.category?.replace('_', ' ')}
                         </div>
                       </td>
+                      {/* Unit */}
+                      <td style={{ textAlign: "center" }}>
+                        <span style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--text-muted)", background: "rgba(10,36,99,0.05)", padding: "0.3rem 0.7rem", borderRadius: "8px" }}>
+                          {item.unit || '—'}
+                        </span>
+                      </td>
+                      {/* Qty Used */}
                       <td style={{ textAlign: "right" }}>
                         {editingBomId === item.id ? (
                           <div className="flex flex-column gap-0-5">
                             <input type="number" min="0.01" step="0.01" value={editQty} onChange={e => setEditQty(e.target.value)}
                               className="inline-edit-input" placeholder="Qty" autoFocus />
                             <input type="number" min="0" step="0.01" value={editCost} onChange={e => setEditCost(e.target.value)}
-                              className="inline-edit-input" placeholder="Cost" />
+                              className="inline-edit-input" placeholder="Unit Cost" />
                           </div>
                         ) : (
-                          <span style={{ fontWeight: 900, color: "var(--primary)", fontSize: "1.1rem" }}>{parseFloat(item.quantity_used).toLocaleString("en-IN")} <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>{item.unit}</span></span>
+                          <span style={{ fontWeight: 900, color: "var(--primary)", fontSize: "1.05rem" }}>
+                            {qty.toLocaleString("en-IN")}
+                          </span>
                         )}
                       </td>
-                      {(user?.role === 'admin' || user?.role === 'super_admin' || project.created_by === user?.id) && (
+                      {/* Unit Cost */}
+                      <td style={{ textAlign: "right" }}>
+                        <span style={{ fontWeight: 700, color: "var(--text-main)" }}>
+                          {cost > 0 ? `₹ ${cost.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : <span className="text-muted">—</span>}
+                        </span>
+                      </td>
+                      {/* Amount */}
+                      <td style={{ textAlign: "right" }}>
+                        <span style={{ fontWeight: 900, color: amount > 0 ? "var(--primary)" : "var(--text-muted)" }}>
+                          {amount > 0 ? `₹ ${amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "—"}
+                        </span>
+                      </td>
+                      {hasAccess && (
                         <td style={{ textAlign: "center" }}>
                           <div className="flex justify-center gap-0-5">
                             {editingBomId === item.id ? (
@@ -449,15 +496,16 @@ const ManufacturingDetail = () => {
                               </>
                             ) : (
                               <>
-                                <button onClick={() => { setEditingBomId(item.id); setEditQty(item.quantity_used); setEditCost(item.cost); }} className="btn-table-edit" title="Adjust Quantity">✏️</button>
-                                <button onClick={() => handleRemoveBomItem(item)} className="btn-table-danger" title="Redact Resource">🗑️</button>
+                                <button onClick={() => { if(!isClosed) { setEditingBomId(item.id); setEditQty(item.quantity_used); setEditCost(item.cost); } }} className="btn-table-edit" title={isClosed ? "Project Locked" : "Adjust Quantity"} disabled={isClosed} style={{ opacity: isClosed ? 0.3 : 1, cursor: isClosed ? "not-allowed" : "pointer" }}>✏️</button>
+                                <button onClick={() => { if(!isClosed) handleRemoveBomItem(item); }} className="btn-table-danger" title={isClosed ? "Project Locked" : "Redact Resource"} disabled={isClosed} style={{ opacity: isClosed ? 0.3 : 1, cursor: isClosed ? "not-allowed" : "pointer" }}>🗑️</button>
                               </>
                             )}
                           </div>
                         </td>
                       )}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -479,20 +527,20 @@ const ManufacturingDetail = () => {
         {showEditModal && (
           <div className="modal-overlay">
             <div className="card modal-content animate-scale-up">
-              <h2 style={{ fontSize: "1.8rem", fontWeight: 900, marginBottom: "0.5rem", letterSpacing: "-1px" }}>Project <span className="text-primary">Recalibration</span></h2>
-              <p className="text-muted mb-2">Update machine identifier or operational notes.</p>
+              <h2 style={{ fontSize: "1.8rem", fontWeight: 900, marginBottom: "0.5rem", letterSpacing: "-1px" }}>System <span className="text-primary">Configuration</span></h2>
+              <p className="text-muted mb-2">Adjust the operational identity, budget, or protocol for this batch.</p>
               
               <form onSubmit={handleUpdateProject} className="flex flex-column gap-2">
                 <div>
-                  <label className="label-sm">MACHINE IDENTIFIER</label>
+                  <label className="label-sm">SYSTEM IDENTITY</label>
                   <input type="text" value={editForm.machine_name} onChange={e => setEditForm({ ...editForm, machine_name: e.target.value })} required style={{ borderRadius: "14px", height: "3.5rem" }} />
                 </div>
                 <div>
-                  <label className="label-sm">PROJECT BUDGET (₹)</label>
-                  <input type="number" value={editForm.budget} onChange={e => setEditForm({ ...editForm, budget: e.target.value })} style={{ borderRadius: "14px", height: "3.5rem" }} />
+                  <label className="label-sm">BUDGET ALLOCATION (₹)</label>
+                  <input type="number" step="0.01" value={editForm.budget} onChange={e => setEditForm({ ...editForm, budget: e.target.value })} style={{ borderRadius: "14px", height: "3.5rem" }} />
                 </div>
                 <div>
-                  <label className="label-sm">OPERATIONAL NOTES</label>
+                  <label className="label-sm">OPERATIONAL PROTOCOL</label>
                   <textarea value={editForm.note} onChange={e => setEditForm({ ...editForm, note: e.target.value })} style={{ height: "120px", borderRadius: "14px" }} />
                 </div>
 
