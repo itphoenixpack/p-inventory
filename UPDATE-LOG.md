@@ -56,8 +56,20 @@
 
 ---
 
+## 2026-05-12
+
+- **Database Infrastructure Migration** — Migrated Inpack operational database to `inpack_db` standard. Unified connection logic via `dbManager.js` and enforced strict tenant validation across manufacturing modules.
+- **Terminology Simplification & UI Polish** — Overhauled the entire frontend to use clear, accessible language. Replaced corporate jargon ("Facility Node", "Personnel Registry", "Intelligence Report") with intuitive terms ("Warehouse", "User Management", "Inventory Report") for better accessibility.
+- **Super Admin Typos & Security** — Standardized Super Admin identity to `superadmin@phoenix-pack.com`. Cleaned up authentication logic to ensure stable multi-tenant access.
+- **System Cleanup & Optimization** — Purged over 15 redundant script files, diagnostic tools, and legacy migration helpers from the backend. Streamlined the repository structure for better maintainability.
+- **Dynamic Multi-Currency Support** — Implemented region-specific currency formatting. Phoenix users now operate in **AED**, while Inpack users operate in **Rupees (₹)**, including locale-specific numbering formats.
+
+---
+
 ## 2026-05-06
 
 - **Manufacturing Stabilization & Stock Integrity** — Implemented automatic stock restoration on project deletion to prevent inventory loss. Enforced immutability for closed projects to maintain data audit trails.
 - **Enhanced Quantity Precision** — Migrated stock and transaction schemas to `decimal(15, 2)` to support high-precision tracking for raw materials (kg, meters, etc.).
 - **Premium UI Refinement (Manufacturing)** — Polished core metadata editing experience with consistent fields (budget, notes) across list and detail views. Fixed heading rendering bugs and implemented "System Calibration" terminology for industrial feel.
+
+
