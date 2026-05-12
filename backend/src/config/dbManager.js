@@ -5,7 +5,7 @@ const knexConfig = require('../../knexfile');
 const normalizeCompany = (value) => {
   const v = String(value || '').trim().toLowerCase();
   if (v === 'phoenix' || v === 'phx') return 'phoenix';
-  if (v === 'impack' || v === 'inpack' || v === 'imp' || v === 'inp') return 'impack';
+  if (v === 'inpack' || v === 'inp') return 'inpack';
   return null;
 };
 
@@ -35,7 +35,7 @@ const getPoolConfig = (dbEnvName, defaultDbName, urlEnvName) => {
 };
 
 const phoenixPool = new Pool(getPoolConfig('PHOENIX_DB', 'inventory_system', 'DATABASE_URL'));
-const impackPool = new Pool(getPoolConfig('IMPACK_DB', 'impack_db', 'DATABASE_URL_IMPACK'));
+const inpackPool = new Pool(getPoolConfig('INPACK_DB', 'inpack_db', 'DATABASE_URL_INPACK'));
 
 // Knex Instances helper
 const createKnex = (config) => {
@@ -48,19 +48,19 @@ const createKnex = (config) => {
 };
 
 const phoenixKnex = createKnex(getPoolConfig('PHOENIX_DB', 'inventory_system', 'DATABASE_URL'));
-const impackKnex = createKnex(getPoolConfig('IMPACK_DB', 'impack_db', 'DATABASE_URL_IMPACK'));
+const inpackKnex = createKnex(getPoolConfig('INPACK_DB', 'inpack_db', 'DATABASE_URL_INPACK'));
 
 const getDB = (companyRaw) => {
   const company = normalizeCompany(companyRaw) || 'phoenix';
   if (company === 'phoenix') return phoenixPool;
-  if (company === 'impack') return impackPool;
+  if (company === 'inpack') return inpackPool;
   return phoenixPool;
 };
 
 const getKnex = (companyRaw) => {
   const company = normalizeCompany(companyRaw) || 'phoenix';
   if (company === 'phoenix') return phoenixKnex;
-  if (company === 'impack') return impackKnex;
+  if (company === 'inpack') return inpackKnex;
   return phoenixKnex;
 };
 
@@ -68,7 +68,7 @@ module.exports = {
   getDB,
   getKnex,
   normalizeCompany,
-  pools: { phoenixPool, impackPool },
-  knexs: { phoenixKnex, impackKnex },
+  pools: { phoenixPool, inpackPool },
+  knexs: { phoenixKnex, inpackKnex },
 };
 

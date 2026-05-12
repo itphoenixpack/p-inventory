@@ -15,11 +15,14 @@ import { useAuth } from "../context/AuthContext";
 const ProtectedRoute = ({ children, allowedRoles, inpackOnly = false }) => {
   const { user, loading } = useAuth();
   
-  if (loading) return <div>Synchronizing Security...</div>;
+  if (loading) return <div>Loading security...</div>;
   if (!user) return <Navigate to="/login" replace />;
   
   if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return <Navigate to={["admin", "super_admin"].includes(user.role) ? "/admin" : "/user"} replace />;
+    // Determine redirect based on role
+    const isAdmin = ["admin", "super_admin"].includes(user.role);
+    const redirectPath = isAdmin ? "/admin" : (user.role === 'viewer' ? "/user/analytics" : "/user");
+    return <Navigate to={redirectPath} replace />;
   }
 
   if (inpackOnly && user.company !== 'inpack') {
@@ -32,8 +35,12 @@ const ProtectedRoute = ({ children, allowedRoles, inpackOnly = false }) => {
 const PublicRoute = ({ children }) => {
   const { user, loading } = useAuth();
   
-  if (loading) return <div>Initializing...</div>;
-  if (user) return <Navigate to={["admin", "super_admin"].includes(user.role) ? "/admin" : "/user"} replace />;
+  if (loading) return <div>Loading...</div>;
+  if (user) {
+    const isAdmin = ["admin", "super_admin"].includes(user.role);
+    const redirectPath = isAdmin ? "/admin" : (user.role === 'viewer' ? "/user/analytics" : "/user");
+    return <Navigate to={redirectPath} replace />;
+  }
   
   return children;
 };
@@ -63,13 +70,13 @@ const AppRoutes = () => {
         } />
         
         <Route path="/admin/products" element={
-          <ProtectedRoute allowedRoles={["admin", "super_admin", "user"]}>
+          <ProtectedRoute allowedRoles={["admin", "super_admin", "user", "viewer"]}>
             <AdminProducts />
           </ProtectedRoute>
         } />
         
         <Route path="/admin/stock" element={
-          <ProtectedRoute allowedRoles={["admin", "super_admin"]}>
+          <ProtectedRoute allowedRoles={["admin", "super_admin", "viewer"]}>
             <AdminStock />
           </ProtectedRoute>
         } />
@@ -81,13 +88,13 @@ const AppRoutes = () => {
         } />
 
         <Route path="/admin/manufacturing" element={
-          <ProtectedRoute allowedRoles={["admin", "super_admin", "user"]} inpackOnly={true}>
+          <ProtectedRoute allowedRoles={["admin", "super_admin", "user", "viewer"]} inpackOnly={true}>
             <ManufacturingList />
           </ProtectedRoute>
         } />
 
         <Route path="/admin/manufacturing/:id" element={
-          <ProtectedRoute allowedRoles={["admin", "super_admin", "user"]} inpackOnly={true}>
+          <ProtectedRoute allowedRoles={["admin", "super_admin", "user", "viewer"]} inpackOnly={true}>
             <ManufacturingDetail />
           </ProtectedRoute>
         } />
@@ -105,7 +112,7 @@ const AppRoutes = () => {
         } />
 
         <Route path="/user/analytics" element={
-          <ProtectedRoute allowedRoles={["user", "admin", "super_admin"]}>
+          <ProtectedRoute allowedRoles={["user", "admin", "super_admin", "viewer"]}>
             <AdminPanel />
           </ProtectedRoute>
         } />

@@ -13,7 +13,7 @@ class ManufacturingController {
   };
 
   _checkInpack = (req) => {
-    if (req.company !== 'impack' && req.company !== 'inpack') {
+    if (req.company !== 'inpack') {
       throw { statusCode: 403, message: 'Manufacturing module is exclusive to Inpack Node.' };
     }
   };

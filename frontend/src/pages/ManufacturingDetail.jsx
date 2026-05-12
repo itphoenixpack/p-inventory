@@ -4,6 +4,7 @@ import Layout from "../components/Layout";
 import api from "../api/axios";
 import { toast } from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
+import { getCurrencySymbol, formatCurrency } from "../utils/currency";
 
 const STATUS_META = {
   not_started: { label: "Not Started", color: "#6b7280", bg: "rgba(107,114,128,0.12)" },
@@ -306,7 +307,7 @@ const ManufacturingDetail = () => {
           <div className="card glass-card-premium" style={{ borderLeft: "6px solid #3b82f6" }}>
             <p className="label-sm">BUDGET ALLOCATION</p>
             <p style={{ fontSize: "1.8rem", fontWeight: 900, color: "var(--primary)" }}>
-              ₹ {parseFloat(project.budget || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              {formatCurrency(project.budget, user?.company)}
             </p>
           </div>
 
@@ -395,7 +396,7 @@ const ManufacturingDetail = () => {
                 </div>
 
                 <div>
-                  <label className="label-sm">UNIT COST (₹)</label>
+                  <label className="label-sm">UNIT COST ({getCurrencySymbol(user?.company)})</label>
                   <input
                     type="number" min="0" step="0.01"
                     value={costInput}
@@ -477,13 +478,13 @@ const ManufacturingDetail = () => {
                       {/* Unit Cost */}
                       <td style={{ textAlign: "right" }}>
                         <span style={{ fontWeight: 700, color: "var(--text-main)" }}>
-                          {cost > 0 ? `₹ ${cost.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : <span className="text-muted">—</span>}
+                          {cost > 0 ? formatCurrency(cost, user?.company) : <span className="text-muted">—</span>}
                         </span>
                       </td>
                       {/* Amount */}
                       <td style={{ textAlign: "right" }}>
                         <span style={{ fontWeight: 900, color: amount > 0 ? "var(--primary)" : "var(--text-muted)" }}>
-                          {amount > 0 ? `₹ ${amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "—"}
+                          {amount > 0 ? formatCurrency(amount, user?.company) : "—"}
                         </span>
                       </td>
                       {hasAccess && (
@@ -515,7 +516,7 @@ const ManufacturingDetail = () => {
                 <div style={{ textAlign: "right" }}>
                   <p className="label-sm">AGGREGATE PROJECT VALUE</p>
                   <p style={{ fontSize: "2.2rem", fontWeight: 950, color: "var(--primary)", letterSpacing: "-1.5px" }}>
-                    ₹ {parseFloat(project.total_cost || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                    {formatCurrency(project.total_cost, user?.company)}
                   </p>
                 </div>
               </div>
@@ -536,7 +537,7 @@ const ManufacturingDetail = () => {
                   <input type="text" value={editForm.machine_name} onChange={e => setEditForm({ ...editForm, machine_name: e.target.value })} required style={{ borderRadius: "14px", height: "3.5rem" }} />
                 </div>
                 <div>
-                  <label className="label-sm">BUDGET ALLOCATION (₹)</label>
+                  <label className="label-sm">BUDGET ALLOCATION ({getCurrencySymbol(user?.company)})</label>
                   <input type="number" step="0.01" value={editForm.budget} onChange={e => setEditForm({ ...editForm, budget: e.target.value })} style={{ borderRadius: "14px", height: "3.5rem" }} />
                 </div>
                 <div>

@@ -4,6 +4,7 @@ import Layout from "../components/Layout";
 import api from "../api/axios";
 import { toast } from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
+import { getCurrencySymbol } from "../utils/currency";
 
 const STATUS_META = {
   not_started: { label: "Pending", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.12)", icon: "⏳" },
@@ -356,7 +357,7 @@ const ManufacturingList = () => {
                 />
               </div>
               <div>
-                <label style={{ display: "block", marginBottom: "0.8rem", fontSize: "0.8rem", fontWeight: 800, color: "var(--primary)", letterSpacing: "1px" }}>BUDGET ALLOCATION (₹)</label>
+                <label style={{ display: "block", marginBottom: "0.8rem", fontSize: "0.8rem", fontWeight: 800, color: "var(--primary)", letterSpacing: "1px" }}>BUDGET ALLOCATION ({getCurrencySymbol(user?.company)})</label>
                 <input 
                   type="number" 
                   value={form.budget} 
