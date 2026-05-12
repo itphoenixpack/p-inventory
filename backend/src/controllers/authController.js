@@ -17,8 +17,9 @@ const register = async (req, res) => {
     // Register with status='pending' — super_admin must approve before login is allowed
     const newUser = await db.query(
       'INSERT INTO users (name, email, password, role, status, login_count) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, email, role, status',
-      [name, email, hashedPassword, 'pending', 'pending', 0]
+      [name, email, hashedPassword, 'user', 'pending', 0]
     );
+
 
     // Notify super_admin of the new registration request
     const alertMsg = `New Registration Request: ${name} (${email}) is awaiting approval.`;

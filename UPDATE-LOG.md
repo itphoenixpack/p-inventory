@@ -63,6 +63,9 @@
 - **Super Admin Typos & Security** — Standardized Super Admin identity to `superadmin@phoenix-pack.com`. Cleaned up authentication logic to ensure stable multi-tenant access.
 - **System Cleanup & Optimization** — Purged over 15 redundant script files, diagnostic tools, and legacy migration helpers from the backend. Streamlined the repository structure for better maintainability.
 - **Dynamic Multi-Currency Support** — Implemented region-specific currency formatting. Phoenix users now operate in **AED**, while Inpack users operate in **Rupees (₹)**, including locale-specific numbering formats.
+- **User Registration Fix** — Resolved a database constraint error (`users_role_check`) by standardizing new registrations to use the `user` role with a `pending` status. Expanded the database constraint to include `viewer` and `pending` roles for future-proofing and backward compatibility.
+
+
 
 ---
 
