@@ -1,12 +1,14 @@
 import Layout from "../components/Layout";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import api from "../api/axios";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "react-hot-toast";
+import { IconSearch } from "../components/Icons";
 
 const UpdateStock = () => {
     useAuth();
     const [products, setProducts] = useState([]);
+    const [stockRows, setStockRows] = useState([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [formData, setFormData] = useState({
@@ -15,21 +17,23 @@ const UpdateStock = () => {
         quantity: "",
         shelf_code: ""
     });
+    const [selectedSummary, setSelectedSummary] = useState(null);
     const [loading, setLoading] = useState(false);
-    const [message, setMessage] = useState({ type: "", text: "" });
     const suggestionRef = useRef(null);
 
-    useEffect(() => {
-        const fetchProducts = async () => {
-            try {
-                const res = await api.get("/products");
-                setProducts(res.data);
-            } catch (error) {
-                console.error("Error fetching products:", error);
-            }
-        };
-        fetchProducts();
+    const loadCatalogAndStock = useCallback(async () => {
+        try {
+            const [prodRes, stockRes] = await Promise.all([api.get("/products"), api.get("/stock")]);
+            setProducts(prodRes.data);
+            setStockRows(stockRes.data);
+        } catch (error) {
+            console.error("Error fetching catalog/stock:", error);
+        }
     }, []);
+
+    useEffect(() => {
+        loadCatalogAndStock();
+    }, [loadCatalogAndStock]);
 
     // Close suggestions when clicking outside
     useEffect(() => {
@@ -42,45 +46,80 @@ const UpdateStock = () => {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    const applyProductFromStock = useCallback((p, rows) => {
+        const list = Array.isArray(rows) ? rows : [];
+        const forProduct = list
+            .filter((s) => Number(s.product_id) === Number(p.id))
+            .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+        const row = forProduct[0];
+        const shelfVal = row?.shelf_code && row.shelf_code !== "N/A" ? row.shelf_code : "";
+        setFormData((prev) => ({
+            ...prev,
+            product_id: p.id,
+            warehouse_name: row?.warehouse_name ?? "",
+            shelf_code: shelfVal,
+            quantity: ""
+        }));
+        setSelectedSummary({
+            name: p.name,
+            sku: p.sku,
+            unit: p.unit || "pcs",
+            category: p.category,
+            costLabel: p.cost_per_unit != null ? String(p.cost_per_unit) : "—",
+            currentQty: row != null ? Number(row.quantity) : 0,
+            hasRow: Boolean(row),
+            locationHint: row
+                ? `Prefilled from the most recently updated location (${row.warehouse_name}${shelfVal ? ` · ${shelfVal}` : ""}).`
+                : "No stock row yet — enter warehouse and shelf, then add stock."
+        });
+    }, []);
+
     const handleSelectProduct = (p) => {
-        setFormData({ ...formData, product_id: p.id });
+        applyProductFromStock(p, stockRows);
         setSearchTerm(`${p.name} (${p.sku})`);
         setShowSuggestions(false);
     };
 
     const handleAction = async (action) => {
-        if (!formData.quantity || !formData.warehouse_name || !formData.product_id) {
-            toast.error("Please fill in all fields.");
+        const qty = Number(formData.quantity);
+        if (!formData.product_id || !formData.warehouse_name?.trim()) {
+            toast.error("Select a product and enter a warehouse.");
+            return;
+        }
+        if (!Number.isFinite(qty) || qty <= 0) {
+            toast.error(`Enter a valid quantity (${selectedSummary?.unit || "units"}).`);
             return;
         }
 
+        const pid = formData.product_id;
         setLoading(true);
-        setMessage({ type: "", text: "" });
         try {
             const endpoint = action === "add" ? "/stock/add" : "/stock/remove";
             await api.post(endpoint, {
-                product_id: parseInt(formData.product_id),
-                warehouse_name: formData.warehouse_name,
-                quantity: parseInt(formData.quantity),
-                shelf_code: formData.shelf_code
+                product_id: Number(formData.product_id),
+                warehouse_name: formData.warehouse_name.trim(),
+                quantity: qty,
+                shelf_code: (formData.shelf_code || "").trim() || "N/A"
             });
-            toast.success(`Stock ${action === "add" ? "Added" : "Removed"} successfully.`);
-            setFormData(prev => ({ ...prev, quantity: "", shelf_code: "" }));
-            // We keep product_id and searchTerm if user wants to add more of the same item, 
-            // but the user might want it cleared. Let's clear it to be safe.
-            setFormData({ product_id: "", warehouse_name: formData.warehouse_name, quantity: "", shelf_code: "" });
-            setSearchTerm("");
+            toast.success(`Stock ${action === "add" ? "added" : "removed"} successfully.`);
+            const stockRes = await api.get("/stock");
+            setStockRows(stockRes.data);
+            const p = products.find((x) => Number(x.id) === Number(pid));
+            if (p) applyProductFromStock(p, stockRes.data);
+            setFormData((prev) => ({ ...prev, quantity: "" }));
         } catch (error) {
-            toast.error(error.response?.data?.message || "Failed to update stock.");
+            toast.error(error.response?.data?.message || error.response?.data?.error || "Failed to update stock.");
         } finally {
             setLoading(false);
         }
     };
 
-    const filteredSuggestions = products.filter(p => 
-        p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        p.sku.toLowerCase().includes(searchTerm.toLowerCase())
-    ).slice(0, 8);
+    const filteredSuggestions = Array.isArray(products) 
+        ? products.filter(p => 
+            (p.name && p.name.toLowerCase().includes(searchTerm.toLowerCase())) || 
+            (p.sku && p.sku.toLowerCase().includes(searchTerm.toLowerCase()))
+        ).slice(0, 8)
+        : [];
 
     return (
         <Layout>
@@ -96,7 +135,10 @@ const UpdateStock = () => {
                         
                         {/* Searchable Item Input */}
                         <div style={{ position: "relative" }} ref={suggestionRef}>
-                            <label style={{ display: "block", marginBottom: "0.5rem", fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)" }}>1. SEARCH PRODUCT</label>
+                            <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: "0.5rem", fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)" }}>
+                                <IconSearch size={16} style={{ opacity: 0.7 }} />
+                                1. SEARCH PRODUCT
+                            </label>
                             <input
                                 type="text"
                                 placeholder="Type product name or SKU..."
@@ -104,6 +146,10 @@ const UpdateStock = () => {
                                 onChange={(e) => {
                                     setSearchTerm(e.target.value);
                                     setShowSuggestions(true);
+                                    if (!e.target.value.trim()) {
+                                        setFormData((f) => ({ ...f, product_id: "", warehouse_name: "", shelf_code: "", quantity: "" }));
+                                        setSelectedSummary(null);
+                                    }
                                 }}
                                 onFocus={() => setShowSuggestions(true)}
                                 style={{ height: "3.5rem" }}
@@ -113,7 +159,7 @@ const UpdateStock = () => {
                                     position: "absolute", top: "100%", left: 0, right: 0, 
                                     backgroundColor: "#1e293b", border: "1px solid var(--border)",
                                     borderRadius: "12px", marginTop: "5px", zIndex: 10,
-                                    boxShadow: "0 10px 25px rgba(0,0,0,0.3)", overflow: "hidden"
+                                    boxShadow: "0 10px 25px rgba(0,0,0,0.3)", overflow: "hidden", color: "white"
                                 }}>
                                     {filteredSuggestions.length > 0 ? filteredSuggestions.map(p => (
                                         <div 
@@ -127,7 +173,7 @@ const UpdateStock = () => {
                                             onMouseLeave={(e) => e.target.style.backgroundColor = "transparent"}
                                         >
                                             <div style={{ fontWeight: 800, fontSize: "0.9rem" }}>{p.name}</div>
-                                            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>SKU: {p.sku} | {p.category.toUpperCase().replace('_', ' ')}</div>
+                                            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>SKU: {p.sku} | {(p.category || "—").replace(/_/g, " ").toUpperCase()} · Unit: {p.unit || "pcs"}</div>
                                         </div>
                                     )) : (
                                         <div style={{ padding: "1rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>No matching products found.</div>
@@ -135,6 +181,31 @@ const UpdateStock = () => {
                                 </div>
                             )}
                         </div>
+
+                        {selectedSummary && (
+                            <div
+                                style={{
+                                    padding: "1rem 1.25rem",
+                                    borderRadius: "12px",
+                                    background: "rgba(59, 130, 246, 0.08)",
+                                    border: "1px solid rgba(59, 130, 246, 0.25)",
+                                    fontSize: "0.85rem"
+                                }}
+                            >
+                                <div style={{ fontWeight: 800, color: "var(--primary)", marginBottom: "0.35rem" }}>{selectedSummary.name}</div>
+                                <div className="text-muted" style={{ display: "grid", gap: "0.25rem", fontSize: "0.8rem" }}>
+                                    <span>SKU: <code style={{ fontWeight: 700 }}>{selectedSummary.sku}</code></span>
+                                    <span>
+                                        On hand at this location:{" "}
+                                        <strong>
+                                            {selectedSummary.currentQty} {selectedSummary.unit}
+                                        </strong>
+                                    </span>
+                                    <span>Unit cost: {selectedSummary.costLabel}</span>
+                                    <span style={{ fontStyle: "italic", marginTop: "0.25rem" }}>{selectedSummary.locationHint}</span>
+                                </div>
+                            </div>
+                        )}
 
                         <div className="flex gap-1" style={{ flexWrap: "wrap" }}>
                             <div style={{ flex: 1, minWidth: "200px" }}>
@@ -160,9 +231,13 @@ const UpdateStock = () => {
                             </div>
 
                             <div style={{ flex: 1, minWidth: "150px" }}>
-                                <label style={{ display: "block", marginBottom: "0.5rem", fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)" }}>4. QUANTITY</label>
+                                <label style={{ display: "block", marginBottom: "0.5rem", fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)" }}>
+                                    4. QUANTITY TO ADD OR REMOVE ({selectedSummary?.unit || "units"})
+                                </label>
                                 <input
                                     type="number"
+                                    min="0"
+                                    step="any"
                                     placeholder="0"
                                     value={formData.quantity}
                                     onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
