@@ -135,11 +135,14 @@ const AdminStock = () => {
         );
     };
 
-    const filteredStock = stock.filter(item =>
-        (item.product_name?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
-        (item.product_sku?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
-        (item.warehouse_name?.toLowerCase() || "").includes(searchTerm.toLowerCase())
-    );
+    const filteredStock = Array.isArray(stock) 
+        ? stock.filter(item =>
+            (item.product_name?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+            (item.product_sku?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+            (item.warehouse_name?.toLowerCase() || "").includes(searchTerm.toLowerCase())
+        )
+        : [];
+
 
     const stockByLocation = groupByLocation(filteredStock);
 
@@ -147,7 +150,7 @@ const AdminStock = () => {
         <div className="card glass-card" style={{ padding: 0, marginBottom: "2rem", borderTop: "4px solid var(--accent)" }}>
             <div className="flex justify-between align-center" style={{ padding: "1.25rem 2rem", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
                 <h2 style={{ fontSize: "1.1rem", letterSpacing: "-0.5px" }}>{warehouseName} <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", fontWeight: 400 }}>— Stock List</span></h2>
-                <span style={{ fontSize: "0.65rem", fontWeight: 900, color: "white", background: "rgba(255,255,255,0.15)", padding: "0.3rem 0.8rem", borderRadius: "20px", letterSpacing: "1px" }}>{data.length} LINE ITEMS</span>
+                <span style={{ fontSize: "0.65rem", fontWeight: 900, color: "var(--primary)", background: "rgba(29, 71, 155, 0.1)", padding: "0.3rem 0.8rem", borderRadius: "20px", letterSpacing: "1px" }}>{data.length} LINE ITEMS</span>
             </div>
             <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
@@ -260,12 +263,12 @@ const AdminStock = () => {
 
                         <form onSubmit={handleUpdate} className="flex flex-column gap-1">
                             <div>
-                                <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>SHELF CODE</label>
-                                <input type="text" value={editData.shelf_code} onChange={(e) => setEditData({ ...editData, shelf_code: e.target.value })} required style={{ height: "3.5rem", backgroundColor: "rgba(255,255,255,0.03)", color: "white", padding: "0 1.25rem", border: "1px solid rgba(255,255,255,0.1)" }} />
+                                <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "var(--text-muted)" }}>SHELF CODE</label>
+                                <input type="text" value={editData.shelf_code} onChange={(e) => setEditData({ ...editData, shelf_code: e.target.value })} required style={{ height: "3.5rem", backgroundColor: "white", color: "var(--text-main)", padding: "0 1.25rem", border: "1px solid var(--border)" }} />
                             </div>
                             <div>
-                                <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "rgba(255,255,255,0.4)" }}>QUANTITY</label>
-                                <input type="number" value={editData.quantity} onChange={(e) => setEditData({ ...editData, quantity: e.target.value })} required style={{ height: "3.5rem", backgroundColor: "rgba(255,255,255,0.03)", color: "white", padding: "0 1.25rem", border: "1px solid rgba(255,255,255,0.1)" }} />
+                                <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "var(--text-muted)" }}>QUANTITY</label>
+                                <input type="number" value={editData.quantity} onChange={(e) => setEditData({ ...editData, quantity: e.target.value })} required style={{ height: "3.5rem", backgroundColor: "white", color: "var(--text-main)", padding: "0 1.25rem", border: "1px solid var(--border)" }} />
                             </div>
                             <div className="flex gap-1 justify-end mt-2">
                                 <button type="button" onClick={() => setEditingItem(null)} style={{ flex: 1, backgroundColor: "#334155", color: "white", fontWeight: 800 }}>CANCEL</button>
