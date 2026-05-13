@@ -129,7 +129,7 @@ const AdminProducts = () => {
             setEditingProduct(null);
             fetchProducts();
             toast.success("Product details updated.");
-        } catch (err) {
+        } catch {
             toast.error("Failed to update product details.");
         }
     };
@@ -140,7 +140,7 @@ const AdminProducts = () => {
             await api.delete(`/products/${id}`);
             fetchProducts();
             toast.success("Product deleted.");
-        } catch (err) {
+        } catch {
             toast.error("Delete failed. Product may be in use.");
         }
     };
