@@ -1,5 +1,6 @@
 import Layout from "../components/Layout";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "react-hot-toast";
@@ -8,6 +9,7 @@ import { IconSearch } from "../components/Icons";
 const UpdateStock = () => {
     useAuth();
     const [products, setProducts] = useState([]);
+    const [searchParams] = useSearchParams();
     const [stockRows, setStockRows] = useState([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -15,7 +17,9 @@ const UpdateStock = () => {
         product_id: "",
         warehouse_name: "",
         quantity: "",
-        shelf_code: ""
+        shelf_code: "",
+        product_name: "",
+        product_description: ""
     });
     const [selectedSummary, setSelectedSummary] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -26,24 +30,11 @@ const UpdateStock = () => {
             const [prodRes, stockRes] = await Promise.all([api.get("/products"), api.get("/stock")]);
             setProducts(prodRes.data);
             setStockRows(stockRes.data);
+            return { products: prodRes.data, stockRows: stockRes.data };
         } catch (error) {
             console.error("Error fetching catalog/stock:", error);
+            return { products: [], stockRows: [] };
         }
-    }, []);
-
-    useEffect(() => {
-        loadCatalogAndStock();
-    }, [loadCatalogAndStock]);
-
-    // Close suggestions when clicking outside
-    useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (suggestionRef.current && !suggestionRef.current.contains(event.target)) {
-                setShowSuggestions(false);
-            }
-        };
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
     const applyProductFromStock = useCallback((p, rows) => {
@@ -56,6 +47,8 @@ const UpdateStock = () => {
         setFormData((prev) => ({
             ...prev,
             product_id: p.id,
+            product_name: p.name,
+            product_description: p.description || "",
             warehouse_name: row?.warehouse_name ?? "",
             shelf_code: shelfVal,
             quantity: ""
@@ -74,6 +67,65 @@ const UpdateStock = () => {
         });
     }, []);
 
+    useEffect(() => {
+        const init = async () => {
+            const { products: fetchedProducts, stockRows: fetchedStockRows } = await loadCatalogAndStock();
+            
+            const pId = searchParams.get("product_id");
+            const warehouse = searchParams.get("warehouse");
+            const shelf = searchParams.get("shelf");
+            
+            if (pId && fetchedProducts.length > 0) {
+                const p = fetchedProducts.find(x => String(x.id) === String(pId));
+                if (p) {
+                    setSearchTerm(`${p.name} (${p.sku})`);
+                    
+                    if (warehouse) {
+                        setFormData({
+                            product_id: p.id,
+                            product_name: p.name,
+                            product_description: p.description || "",
+                            warehouse_name: warehouse,
+                            shelf_code: shelf || "N/A",
+                            quantity: ""
+                        });
+                        
+                        const row = fetchedStockRows.find(s => 
+                            Number(s.product_id) === Number(p.id) && 
+                            s.warehouse_name === warehouse && 
+                            (s.shelf_code === shelf || (s.shelf_code === "N/A" && !shelf))
+                        );
+
+                        setSelectedSummary({
+                            name: p.name,
+                            sku: p.sku,
+                            unit: p.unit || "pcs",
+                            category: p.category,
+                            costLabel: p.cost_per_unit != null ? String(p.cost_per_unit) : "—",
+                            currentQty: row != null ? Number(row.quantity) : 0,
+                            hasRow: Boolean(row),
+                            locationHint: `Location: ${warehouse}${shelf ? ` · ${shelf}` : ""}`
+                        });
+                    } else {
+                        applyProductFromStock(p, fetchedStockRows);
+                    }
+                }
+            }
+        };
+        init();
+    }, [loadCatalogAndStock, searchParams, applyProductFromStock]);
+
+    // Close suggestions when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (suggestionRef.current && !suggestionRef.current.contains(event.target)) {
+                setShowSuggestions(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
     const handleSelectProduct = (p) => {
         applyProductFromStock(p, stockRows);
         setSearchTerm(`${p.name} (${p.sku})`);
@@ -87,13 +139,19 @@ const UpdateStock = () => {
             return;
         }
         if (!Number.isFinite(qty) || qty <= 0) {
-            toast.error(`Enter a valid quantity (${selectedSummary?.unit || "units"}).`);
+            toast.error(`Enter a valid quantity (pcs).`);
             return;
         }
 
         const pid = formData.product_id;
         setLoading(true);
         try {
+            // Unified Update: Sync product details first
+            await api.put(`/products/${pid}`, {
+                name: formData.product_name,
+                description: formData.product_description
+            });
+
             const endpoint = action === "add" ? "/stock/add" : "/stock/remove";
             await api.post(endpoint, {
                 product_id: Number(formData.product_id),
@@ -183,26 +241,38 @@ const UpdateStock = () => {
                         </div>
 
                         {selectedSummary && (
-                            <div
-                                style={{
-                                    padding: "1rem 1.25rem",
-                                    borderRadius: "12px",
-                                    background: "rgba(59, 130, 246, 0.08)",
-                                    border: "1px solid rgba(59, 130, 246, 0.25)",
-                                    fontSize: "0.85rem"
-                                }}
-                            >
-                                <div style={{ fontWeight: 800, color: "var(--primary)", marginBottom: "0.35rem" }}>{selectedSummary.name}</div>
-                                <div className="text-muted" style={{ display: "grid", gap: "0.25rem", fontSize: "0.8rem" }}>
-                                    <span>SKU: <code style={{ fontWeight: 700 }}>{selectedSummary.sku}</code></span>
-                                    <span>
-                                        On hand at this location:{" "}
-                                        <strong>
-                                            {selectedSummary.currentQty} {selectedSummary.unit}
-                                        </strong>
-                                    </span>
-                                    <span>Unit cost: {selectedSummary.costLabel}</span>
-                                    <span style={{ fontStyle: "italic", marginTop: "0.25rem" }}>{selectedSummary.locationHint}</span>
+                            <div className="flex flex-column gap-1" style={{ background: "rgba(255,255,255,0.02)", padding: "1.5rem", borderRadius: "12px", border: "1px solid var(--border)" }}>
+                                <div className="flex gap-1">
+                                    <div style={{ flex: 2 }}>
+                                        <label style={{ display: "block", marginBottom: "0.5rem", fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)" }}>PRODUCT NAME</label>
+                                        <input
+                                            type="text"
+                                            value={formData.product_name}
+                                            onChange={(e) => setFormData({ ...formData, product_name: e.target.value })}
+                                            style={{ height: "3.5rem" }}
+                                        />
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <label style={{ display: "block", marginBottom: "0.5rem", fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)" }}>SKU (READ-ONLY)</label>
+                                        <input
+                                            type="text"
+                                            value={selectedSummary.sku}
+                                            disabled
+                                            style={{ height: "3.5rem", opacity: 0.6, background: "rgba(0,0,0,0.1)" }}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label style={{ display: "block", marginBottom: "0.5rem", fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)" }}>PRODUCT DETAILS</label>
+                                    <textarea
+                                        placeholder="Enter additional details..."
+                                        value={formData.product_description}
+                                        onChange={(e) => setFormData({ ...formData, product_description: e.target.value })}
+                                        style={{ height: "80px", resize: "none", padding: "1rem" }}
+                                    />
+                                </div>
+                                <div style={{ fontSize: "0.75rem", color: "var(--primary)", fontWeight: 700, marginTop: "0.5rem" }}>
+                                    {selectedSummary.locationHint} | Current: {selectedSummary.currentQty} pcs
                                 </div>
                             </div>
                         )}
@@ -232,7 +302,7 @@ const UpdateStock = () => {
 
                             <div style={{ flex: 1, minWidth: "150px" }}>
                                 <label style={{ display: "block", marginBottom: "0.5rem", fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)" }}>
-                                    4. QUANTITY TO ADD OR REMOVE ({selectedSummary?.unit || "units"})
+                                    4. QUANTITY TO ADD OR REMOVE (PCS)
                                 </label>
                                 <input
                                     type="number"

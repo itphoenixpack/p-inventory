@@ -1,13 +1,15 @@
 import Layout from "../components/Layout";
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { toast } from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
 import { getCurrencySymbol, formatCurrency } from "../utils/currency";
-import { IconSearch, IconPackage } from "../components/Icons";
+import { IconSearch, IconPackage, IconSettings, IconTrash, IconPlus } from "../components/Icons";
 
 const AdminProducts = () => {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const role = user?.role;
     const isViewer = role === "viewer";
 
@@ -175,8 +177,8 @@ const AdminProducts = () => {
                           />
                         </div>
                         {!isViewer && (
-                            <button onClick={() => setShowAddForm(!showAddForm)} style={{ height: "3.5rem", padding: "0 1.5rem", fontWeight: 800 }}>
-                                {showAddForm ? "CLOSE FORM" : "+ NEW ENTRY"}
+                            <button onClick={() => setShowAddForm(!showAddForm)} style={{ height: "3.5rem", padding: "0 1.5rem", fontWeight: 800, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                {showAddForm ? "CLOSE FORM" : <><IconPlus size={18} /> NEW ENTRY</>}
                             </button>
                         )}
                     </div>
@@ -207,26 +209,17 @@ const AdminProducts = () => {
                                     <input type="text" value={newProduct.shelf_code} onChange={(e) => setNewProduct({ ...newProduct, shelf_code: e.target.value })} placeholder="e.g. A1-B2" required style={{ height: "3.5rem" }} />
                                 </div>
                                 <div>
+                                    <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "var(--text-muted)", letterSpacing: "1px" }}>
+                                        QUANTITY (PCS)
+                                    </label>
+                                    <input type="number" min="0" step="any" value={newProduct.initial_quantity} onChange={(e) => setNewProduct({ ...newProduct, initial_quantity: e.target.value })} placeholder="0" style={{ height: "3.5rem" }} />
+                                </div>
+                                <div>
                                     <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "var(--text-muted)", letterSpacing: "1px" }}>CATEGORY</label>
                                     <select value={newProduct.category} onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })} style={{ height: "3.5rem" }}>
                                         <option value="raw_material">RAW MATERIAL</option>
                                         <option value="spare_part">SPARE PART (HARDWARE)</option>
                                     </select>
-                                </div>
-                                <div>
-                                    <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "var(--text-muted)", letterSpacing: "1px" }}>UNIT OF MEASURE</label>
-                                    <input type="text" value={newProduct.unit} onChange={(e) => setNewProduct({ ...newProduct, unit: e.target.value })} placeholder="e.g. pcs, kg, liters" style={{ height: "3.5rem" }} />
-                                </div>
-                                <div>
-                                    <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "var(--text-muted)", letterSpacing: "1px" }}>
-                                        INITIAL STOCK QUANTITY ({(newProduct.unit || "pcs").toUpperCase()})
-                                    </label>
-                                    <input type="number" min="0" step="any" value={newProduct.initial_quantity} onChange={(e) => setNewProduct({ ...newProduct, initial_quantity: e.target.value })} placeholder="0" style={{ height: "3.5rem" }} />
-                                    <p className="text-muted" style={{ fontSize: "0.7rem", marginTop: "0.35rem", fontWeight: 600 }}>How many {newProduct.unit || "pcs"} are on hand at this warehouse and shelf when registering.</p>
-                                </div>
-                                <div>
-                                    <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "var(--text-muted)", letterSpacing: "1px" }}>UNIT COST ({getCurrencySymbol(user?.company)})</label>
-                                    <input type="number" min="0" step="0.01" value={newProduct.cost_per_unit} onChange={(e) => setNewProduct({ ...newProduct, cost_per_unit: e.target.value })} placeholder="0.00" style={{ height: "3.5rem" }} />
                                 </div>
                             </div>
 
@@ -279,11 +272,36 @@ const AdminProducts = () => {
                                             <td style={{ padding: "1.25rem", fontWeight: 700 }}>{formatCurrency(p.cost_per_unit, user?.company)} / {p.unit || 'pcs'}</td>
                                             <td className="text-muted" style={{ padding: "1.25rem", fontSize: "0.85rem", fontWeight: 500 }}>{p.description || "No details provided."}</td>
                                             <td style={{ padding: "1.25rem 2rem", textAlign: "right" }}>
-                                                {!isViewer && (role === "admin" || role === "user" || role === "super_admin") && (
+                                                {!isViewer && (
                                                     <div className="flex gap-1 justify-end">
-                                                        <button className="btn-sm" onClick={() => handleEditClick(p)} style={{ background: "rgba(255,255,255,0.05)", fontWeight: 800 }}>SPECS</button>
+                                                        {/* Admin & Super Admin: UPDATE (Redirect to stock update) + SPECS (Edit Modal) */}
                                                         {(role === "admin" || role === "super_admin") && (
-                                                            <button className="btn-sm" onClick={() => handleDelete(p.id)} style={{ background: "rgba(225, 29, 72, 0.1)", color: "var(--accent)", fontWeight: 800 }}>DELETE</button>
+                                                            <>
+                                                                <button 
+                                                                    className="btn-sm" 
+                                                                    onClick={() => navigate(`/admin/stock/updates?product_id=${p.id}`)}
+                                                                    style={{ background: "var(--primary)", color: "white", fontWeight: 800 }}
+                                                                >
+                                                                    UPDATE
+                                                                </button>
+                                                                <button className="btn-sm" onClick={() => handleEditClick(p)} style={{ background: "rgba(255,255,255,0.05)", fontWeight: 800, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                                                                    <IconSettings size={14} /> SPECS
+                                                                </button>
+                                                            </>
+                                                        )}
+
+                                                        {/* Admin: Only DELETE */}
+                                                        {(role === "admin" || role === "super_admin") && (
+                                                            <button className="btn-sm" onClick={() => handleDelete(p.id)} style={{ background: "rgba(225, 29, 72, 0.1)", color: "var(--accent)", fontWeight: 800, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                                                                <IconTrash size={14} /> DELETE
+                                                            </button>
+                                                        )}
+                                                        
+                                                        {/* Regular User: Only SPECS */}
+                                                        {role === "user" && (
+                                                            <button className="btn-sm" onClick={() => handleEditClick(p)} style={{ background: "rgba(255,255,255,0.05)", fontWeight: 800, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                                                                <IconSettings size={14} /> SPECS
+                                                            </button>
                                                         )}
                                                     </div>
                                                 )}

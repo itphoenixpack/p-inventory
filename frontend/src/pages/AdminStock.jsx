@@ -1,5 +1,6 @@
 import Layout from "../components/Layout";
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import { toast } from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
@@ -9,15 +10,36 @@ import autoTable from "jspdf-autotable";
 
 const AdminStock = () => {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const role = user?.role;
     const isViewer = role === "viewer";
 
     const [stock, setStock] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
+    const [quickValues, setQuickValues] = useState({});
 
-    const [editingItem, setEditingItem] = useState(null);
-    const [editData, setEditData] = useState({ quantity: 0, shelf_code: "" });
+    const handleQuickAdd = async (item, val) => {
+        const qty = Number(val);
+        if (!qty || qty <= 0) {
+            toast.error("Enter a valid quantity to add.");
+            return;
+        }
+        
+        try {
+            await api.post("/stock/add", {
+                product_id: item.product_id,
+                warehouse_name: item.warehouse_name,
+                shelf_code: item.shelf_code || "N/A",
+                quantity: qty
+            });
+            toast.success(`Added ${qty} pcs to ${item.product_name}`);
+            setQuickValues(prev => ({ ...prev, [stockRowKey(item)]: "" }));
+            fetchStock();
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Failed to update stock.");
+        }
+    };
 
     const fetchStock = async () => {
         try {
@@ -40,23 +62,6 @@ const AdminStock = () => {
             toast.success("Stock record deleted successfully.");
         } catch (err) {
             toast.error("Failed to delete stock record.");
-        }
-    };
-
-    const handleEditClick = (item) => {
-        setEditingItem(item);
-        setEditData({ quantity: item.quantity, shelf_code: item.shelf_code || "" });
-    };
-
-    const handleUpdate = async (e) => {
-        e.preventDefault();
-        try {
-            await api.put(`/stock/${editingItem.id}`, editData);
-            setEditingItem(null);
-            fetchStock();
-            toast.success("Stock record updated successfully.");
-        } catch (err) {
-            toast.error("Failed to update stock record.");
         }
     };
 
@@ -161,7 +166,8 @@ const AdminStock = () => {
                             <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>CATEGORY</th>
                             <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>SHELF</th>
                             <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>AMOUNT</th>
-                            <th style={{ padding: "1.25rem 2rem", textAlign: "right" }}>EDIT</th>
+                            <th style={{ padding: "1.25rem", fontSize: "0.65rem", letterSpacing: "1px", color: "var(--text-muted)" }}>QUICK ADD (PCS)</th>
+                            <th style={{ padding: "1.25rem 2rem", textAlign: "right" }}>ACTION</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -180,7 +186,7 @@ const AdminStock = () => {
                                 <td style={{ padding: "1.25rem" }}>
                                     <div className="flex align-center gap-1">
                                         <span style={{ fontWeight: 900, minWidth: "30px" }}>{item.quantity}</span>
-                                        <div style={{ width: "80px", height: "4px", background: "rgba(255,255,255,0.05)", borderRadius: "2px", overflow: "hidden" }}>
+                                        <div style={{ width: "60px", height: "4px", background: "rgba(255,255,255,0.05)", borderRadius: "2px", overflow: "hidden" }}>
                                             <div style={{
                                                 width: `${Math.min((item.quantity / 100) * 100, 100)}%`,
                                                 height: "100%",
@@ -189,12 +195,45 @@ const AdminStock = () => {
                                             }} />
                                         </div>
                                         <StatusPill qty={item.quantity} />
+                                        <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)" }}>pcs</span>
                                     </div>
                                 </td>
+                                <td style={{ padding: "1.25rem" }}>
+                                    {!isViewer && (
+                                        <div className="flex align-center gap-0.5">
+                                            <input 
+                                                type="number" 
+                                                placeholder="Qty" 
+                                                value={quickValues[stockRowKey(item)] || ""}
+                                                onChange={(e) => setQuickValues({ ...quickValues, [stockRowKey(item)]: e.target.value })}
+                                                style={{ width: "80px", height: "2.5rem", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.9rem", textAlign: "center" }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') handleQuickAdd(item, quickValues[stockRowKey(item)]);
+                                                }}
+                                            />
+                                            <button 
+                                                className="btn-sm" 
+                                                onClick={() => handleQuickAdd(item, quickValues[stockRowKey(item)])}
+                                                style={{ background: "var(--success)", color: "white", fontWeight: 900, height: "2.5rem", width: "40px", fontSize: "1.2rem", padding: 0 }}
+                                            >
+                                                +
+                                            </button>
+                                        </div>
+                                    )}
+                                </td>
                                 <td style={{ padding: "1.25rem 2rem", textAlign: "right" }}>
-                                    {!isViewer && role === "admin" && (
+                                    {!isViewer && (role === "admin" || role === "super_admin") && (
                                         <div className="flex justify-end gap-1">
-                                            <button className="btn-sm" onClick={() => handleEditClick(item)} style={{ background: "rgba(255,255,255,0.05)", fontWeight: 800 }}>EDIT</button>
+                                            <button 
+                                                className="btn-sm" 
+                                                onClick={() => {
+                                                    const path = role === "admin" || role === "super_admin" ? "/admin/stock/updates" : "/user/stock";
+                                                    navigate(`${path}?product_id=${item.product_id}&warehouse=${encodeURIComponent(item.warehouse_name)}&shelf=${encodeURIComponent(item.shelf_code || '')}`);
+                                                }} 
+                                                style={{ background: "var(--primary)", color: "white", fontWeight: 800 }}
+                                            >
+                                                UPDATE
+                                            </button>
                                             <button className="btn-sm" onClick={() => handleDelete(item)} style={{ background: "rgba(225, 29, 72, 0.1)", color: "var(--accent)", fontWeight: 800 }}>DELETE</button>
                                         </div>
                                     )}
@@ -250,34 +289,6 @@ const AdminStock = () => {
                 )}
             </div>
 
-            {editingItem && (
-                <div style={{
-                    position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.85)",
-                    display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(6px)"
-                }}>
-                    <div className="card glass-card" style={{ width: "100%", maxWidth: "420px", padding: "3rem" }}>
-                        <header className="mb-2">
-                            <h2 style={{ letterSpacing: "-1px" }}>Edit <span className="text-accent">Stock</span></h2>
-                            <p className="text-muted" style={{ fontSize: "0.8rem", fontWeight: 600 }}>Editing: {editingItem.product_name}</p>
-                        </header>
-
-                        <form onSubmit={handleUpdate} className="flex flex-column gap-1">
-                            <div>
-                                <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "var(--text-muted)" }}>SHELF CODE</label>
-                                <input type="text" value={editData.shelf_code} onChange={(e) => setEditData({ ...editData, shelf_code: e.target.value })} required style={{ height: "3.5rem", backgroundColor: "white", color: "var(--text-main)", padding: "0 1.25rem", border: "1px solid var(--border)" }} />
-                            </div>
-                            <div>
-                                <label style={{ display: "block", marginBottom: "0.6rem", fontSize: "0.7rem", fontWeight: 800, color: "var(--text-muted)" }}>QUANTITY</label>
-                                <input type="number" value={editData.quantity} onChange={(e) => setEditData({ ...editData, quantity: e.target.value })} required style={{ height: "3.5rem", backgroundColor: "white", color: "var(--text-main)", padding: "0 1.25rem", border: "1px solid var(--border)" }} />
-                            </div>
-                            <div className="flex gap-1 justify-end mt-2">
-                                <button type="button" onClick={() => setEditingItem(null)} style={{ flex: 1, backgroundColor: "#334155", color: "white", fontWeight: 800 }}>CANCEL</button>
-                                <button type="submit" style={{ flex: 1, backgroundColor: "var(--primary)", color: "white", fontWeight: 800 }}>SAVE CHANGES</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
         </Layout>
     );
 };

@@ -37,6 +37,16 @@ const getPoolConfig = (dbEnvName, defaultDbName, urlEnvName) => {
 const phoenixPool = new Pool(getPoolConfig('PHOENIX_DB', 'inventory_system', 'DATABASE_URL'));
 const inpackPool = new Pool(getPoolConfig('INPACK_DB', 'inpack_db', 'DATABASE_URL_INPACK'));
 
+phoenixPool.on('error', (err) => {
+  console.error('--- PHOENIX DB POOL ERROR ---');
+  console.error(err);
+});
+
+inpackPool.on('error', (err) => {
+  console.error('--- INPACK DB POOL ERROR ---');
+  console.error(err);
+});
+
 // Knex Instances helper
 const createKnex = (config) => {
   const connection = config.connectionString ? { connectionString: config.connectionString, ssl: config.ssl } : config;
